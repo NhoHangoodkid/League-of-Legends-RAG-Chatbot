@@ -13,5 +13,5 @@ __pycache__/
 *$py.class
 
 
-.json
-.csv
+*.json
+*.csv
