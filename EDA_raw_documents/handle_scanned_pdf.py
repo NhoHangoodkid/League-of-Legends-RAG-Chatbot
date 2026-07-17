@@ -3,6 +3,8 @@ import fitz
 import numpy as np
 import tqdm
 
+from analyse_document import split_sentence
+
 
 class EngineOCR:
     def __init__(self, language = "en", device = "gpu"):
@@ -14,13 +16,14 @@ class EngineOCR:
         page_lines = []
         confidences = []
 
-        # Return a list of results, each result is a list of tuples (box, text, confidence).
+        # PaddleOCR 3.x returns a list of OCRResult (dict-like objects).
+        # Each OCRResult contains 'rec_texts' and 'rec_scores' as dict keys.
         if results:
             for res in results:
-                # Check if the result has recognized text and confidence scores.
-                if hasattr(res, "rec_texts"):
-                    texts = res.rec_texts
-                    scores = res.rec_scores
+                # OCRResult is dict-like; use 'in' operator instead of hasattr.
+                if "rec_texts" in res:
+                    texts = res["rec_texts"]
+                    scores = res["rec_scores"]
 
                     page_lines.extend(texts)
                     confidences.extend(scores)
@@ -29,11 +32,16 @@ class EngineOCR:
         if confidences:
             avg_conf = float(sum(confidences) / len(confidences))
 
+        full_text = "\n".join(page_lines)
+
         return {
-            "text": " ".join(page_lines),
+            # Preserve line structure with newline for better downstream RAG chunking.
+            "text": full_text,
+            "char_count": len(full_text),
+            "word_count": sum(len(x.split()) for x in page_lines),
+            "sentence_count": len(split_sentence(full_text)),
             "confidence": round(avg_conf, 4),
             "line_count": len(page_lines),
-            "word_count": sum(len(x.split()) for x in page_lines)
         }
     
 def render_page(page, dpi = 300):
@@ -68,10 +76,17 @@ def ocr_flagged_pages(document_path, analysis, engine=None, dpi=300):
     scanned_pages = analysis.get("scanned_page", [])
 
     with fitz.open(document_path) as pdf:
-        for page_number in tqdm.tqdm(scanned_pages, desc="OCR Scanned Pages"):
+        # Validate page count to avoid IndexError if pdfplumber and fitz disagree.
+        fitz_page_count = len(pdf)
+        safe_pages = [p for p in scanned_pages if p <= fitz_page_count]
+
+        for page_number in tqdm.tqdm(safe_pages, desc="OCR Scanned Pages"):
             page = pdf[page_number - 1]  # fitz uses 0-based indexing
             img = render_page(page, dpi=dpi)
             ocr_result = engine.ocr_image(img)
+
+            # Free large numpy array (~25MB at 300 DPI) immediately after OCR.
+            del img
 
             results["pages"][page_number] = ocr_result
 
