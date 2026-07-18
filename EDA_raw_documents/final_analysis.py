@@ -92,7 +92,7 @@ def summarize_merged(merged):
     }
 
 
-def final_analysis(document_path, language="en", device="gpu", dpi=300, output_dir="output"):
+def final_analysis(document_path, engine, language="en", device="gpu", dpi=300, output_dir="output"):
     """Run the full pipeline: analyse -> OCR scanned pages -> merge -> JSON output."""
     os.makedirs(output_dir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(document_path))[0]
@@ -103,8 +103,10 @@ def final_analysis(document_path, language="en", device="gpu", dpi=300, output_d
     analysis = analyze_document(document_path)
 
     # 2. OCR only the flagged scanned pages
-    engine = EngineOCR(language=language, device=device)
-    ocr_results = ocr_flagged_pages(document_path, analysis, engine=engine, dpi=dpi)
+    if analysis.get("scanned_page"):
+        ocr_results = ocr_flagged_pages(document_path, analysis, engine=engine, dpi=dpi)
+    else:
+        ocr_results = {"pages": {}}
 
     # 3. Merge text-layer + OCR into one unified JSON per page.
     merged = merge_document(
@@ -154,6 +156,10 @@ if __name__ == "__main__":
 
     print(f"Found {len(pdf_files)} PDF(s).\n")
 
+    # Initialize OCR engine once for the entire batch
+    print("Initializing OCR Engine...")
+    engine = EngineOCR(language=args.language, device=args.device)
+
     skipped = 0
     for i, pdf_path in enumerate(pdf_files, 1):
         # Incremental mode: skip files whose output already exists.
@@ -168,6 +174,7 @@ if __name__ == "__main__":
         try:
             result = final_analysis(
                 pdf_path,
+                engine=engine,
                 language = args.language,
                 device = args.device,
                 dpi = args.dpi,
