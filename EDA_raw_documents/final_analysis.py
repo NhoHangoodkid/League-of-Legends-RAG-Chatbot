@@ -269,6 +269,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 2: EXECUTIVE SUMMARY — KPI TABLE
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Executive Summary", 2, TOTAL_PAGES, REPORT_TITLE)
 
         ax = fig.add_axes([0.05, 0.08, 0.90, 0.84])
         ax.axis('off')
@@ -317,6 +318,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 3: PDF TYPE DISTRIBUTION
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "PDF Type Distribution", 3, TOTAL_PAGES, REPORT_TITLE)
 
         gs = gridspec.GridSpec(1, 2, figure=fig, left=0.06, right=0.94,
                                top=0.90, bottom=0.08, wspace=0.35)
@@ -353,6 +355,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 4: PAGE COUNT & WORD COUNT DISTRIBUTIONS
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Page & Word Count Distributions", 4, TOTAL_PAGES, REPORT_TITLE)
 
         gs = gridspec.GridSpec(2, 1, figure=fig, left=0.06, right=0.94,
                                top=0.90, bottom=0.08, hspace=0.55)
@@ -383,6 +386,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 5: WORD / SENTENCE STATISTICS
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Linguistic Statistics", 5, TOTAL_PAGES, REPORT_TITLE)
 
         gs = gridspec.GridSpec(1, 2, figure=fig, left=0.06, right=0.94,
                                top=0.90, bottom=0.10, wspace=0.38)
@@ -423,6 +427,7 @@ def generate_pdf_report(all_rows, output_path):
         # PAGE 6: DESCRIPTIVE STATISTICS + BOXPLOT
 
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Descriptive Statistics", 6, TOTAL_PAGES, REPORT_TITLE)
 
         gs6 = gridspec.GridSpec(1, 2, figure=fig, left=0.06, right=0.94,
                                 top=0.90, bottom=0.08, wspace=0.38)
@@ -494,6 +499,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 7: LEXICAL DENSITY & CHAR/WORD ANALYSIS
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Vocabulary & Text Richness", 7, TOTAL_PAGES, REPORT_TITLE)
 
         gs7 = gridspec.GridSpec(1, 2, figure=fig, left=0.07, right=0.93,
                                 top=0.90, bottom=0.10, wspace=0.38)
@@ -531,6 +537,7 @@ def generate_pdf_report(all_rows, output_path):
 
         # PAGE 8: OUTLIER / QUALITY ANALYSIS (Scatter)
         fig = plt.figure(figsize=(11.69, 8.27))
+        add_page_header(fig, "Quality & Outlier Analysis", 8, TOTAL_PAGES, REPORT_TITLE)
 
         gs = gridspec.GridSpec(1, 2, figure=fig, left=0.06, right=0.92,
                                top=0.90, bottom=0.10, wspace=0.40)
@@ -587,10 +594,11 @@ def generate_pdf_report(all_rows, output_path):
         chunks = [df_tbl.iloc[i:i + page_size] for i in range(0, len(df_tbl), page_size)]
 
         for ci, chunk in enumerate(chunks):
-            fig = plt.figure(figsize=(11.69, 8.27))  # A4 landscape — same as all other pages
+            fig = plt.figure(figsize=(16, 8.27))  # wider for table
             page_label = f"Document Detail Table ({ci + 1}/{len(chunks)})"
+            add_page_header(fig, page_label, TOTAL_PAGES, TOTAL_PAGES, REPORT_TITLE)
 
-            ax = fig.add_axes([0.01, 0.04, 0.98, 0.92])
+            ax = fig.add_axes([0.01, 0.05, 0.98, 0.87])
             ax.axis('off')
 
             tbl = ax.table(
@@ -599,14 +607,14 @@ def generate_pdf_report(all_rows, output_path):
                 loc='center', cellLoc='center')
 
             tbl.auto_set_font_size(False)
-            tbl.set_fontsize(6.2)   # smaller font to fit 16 columns on A4
-            tbl.scale(1, 1.45)
+            tbl.set_fontsize(7.5)
+            tbl.scale(1, 1.65)
 
             # Header
             for c in range(len(col_labels)):
                 tbl[0, c].set_facecolor(BRAND_DARK)
                 tbl[0, c].set_text_props(color='white', fontweight='bold')
-                tbl[0, c].set_height(0.06)
+                tbl[0, c].set_height(0.055)
 
             # Alternate row colours
             for r in range(1, len(chunk) + 1):
@@ -689,7 +697,6 @@ if __name__ == "__main__":
     print(f"Found {len(pdf_files)} PDF(s).\n")
 
     # Initialize OCR engine once for the entire batch
-    print("Initializing OCR Engine...")
     engine = EngineOCR(language=args.language, device=args.device)
 
     skipped = 0
@@ -724,7 +731,7 @@ if __name__ == "__main__":
     # 5. Consolidated summary: generate EDA PDF Report from all merged_document.json files.
     merged_jsons = sorted(glob.glob(os.path.join(args.output_dir, "* merged_document.json")))
     if merged_jsons:
-        all_summaries_path = os.path.join(args.output_dir, "_eda_report.pdf")
+        all_summaries_path = os.path.join(args.output_dir, "eda_report.pdf")
         all_rows = []
         for json_path in merged_jsons:
             with open(json_path, "r", encoding="utf-8") as f:
