@@ -31,7 +31,14 @@ def analyze_document(document_path):
         num_of_page = len(pdf.pages)
 
         for page in pdf.pages:
-            text = page.extract_text() 
+            text = page.extract_text(layout=True) 
+
+            # Post-process layout mode: collapse multi-space gaps between columns
+            if text:
+                text = "\n".join(
+                    re.sub(r"  +", " ", line).rstrip()
+                    for line in text.split("\n")
+                )
 
             # Check if the page is scanned or blank; heuristic: < 20 characters.
             if text is None or len(text.strip()) < 20:
