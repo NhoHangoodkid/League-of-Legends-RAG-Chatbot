@@ -511,7 +511,7 @@ def generate_pdf_report(all_rows, output_path):
                    edgecolor='white', linewidth=0.7)
         ax_ld.axvline(df['lexical_density'].mean(), color=ACCENT_RED,
                       linestyle='--', linewidth=1.5,
-                      label=f"Mean = {df['lexical_density'].mean():.3f}")
+                      label=f"Mean = {df['lexical_deSnsity'].mean():.3f}")
         ax_ld.axvline(df['lexical_density'].median(), color=BRAND_DARK,
                       linestyle=':', linewidth=1.5,
                       label=f"Median = {df['lexical_density'].median():.3f}")
