@@ -373,9 +373,18 @@ def remove_garbled_text(text, category="general"):
 
 
 def normalize_ocr_artifacts(text):
-    """Replace Unicode ligatures with plain ASCII characters."""
+    """Replace Unicode ligatures and weird punctuation with plain ASCII characters."""
     for lig, replacement in ligature_map.items():
         text = text.replace(lig, replacement)
+    
+    # Replace guillemets and weird quotes
+    text = text.replace("«", '"').replace("»", '"')
+    text = text.replace("“", '"').replace("”", '"')
+    text = text.replace("‘", "'").replace("’", "'")
+    
+    # Replace weird PDF bullets
+    text = text.replace("", "-").replace("◗", "-")
+    
     return text
 
 
