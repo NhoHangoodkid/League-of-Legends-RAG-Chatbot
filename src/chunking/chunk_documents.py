@@ -135,6 +135,62 @@ def merge_small_chunks(chunks, min_tokens, hard_cap):
     return merged
 
 
+nlp = None
+
+def init_spacy():
+    global nlp
+    if nlp is None:
+        try:
+            import spacy
+            nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+        except Exception:
+            nlp = "fallback"
+
+def is_valid_chunk(text, metadata, drop_answers=False):
+    """Filter out low-quality chunks based on various heuristics."""
+    import re
+    if drop_answers and metadata.get("block_type") == "answer_key":
+        return False
+        
+    if re.match(r"^[A-Da-d][.)]?$", text.strip()):
+        return False
+    if re.match(r"^\d+[.)]?$", text.strip()):
+        return False
+        
+    words = text.split()
+    word_count = len(words)
+    
+    if word_count < 20 and not metadata.get("heading"):
+        if metadata.get("block_type") not in ("table", "qa", "entry"):
+            return False
+            
+    letters = sum(1 for c in text if c.isalpha())
+    digits = sum(1 for c in text if c.isdigit())
+    chars = len(text)
+    
+    if chars > 0:
+        if letters / chars < 0.4:
+            return False
+        if digits / chars > 0.5:
+            return False
+            
+    if word_count > 0:
+        unique_ratio = len(set([w.lower() for w in words])) / word_count
+        if unique_ratio < 0.3:
+            return False
+            
+    init_spacy()
+    if nlp and nlp != "fallback":
+        doc = nlp(text)
+        has_verb = any(token.pos_ == "VERB" or token.pos_ == "AUX" for token in doc)
+        has_noun = any(token.pos_ == "NOUN" or token.pos_ == "PROPN" for token in doc)
+        if not (has_verb and has_noun):
+            if metadata.get("block_type") not in ("table", "entry", "qa", "exercise"): 
+                return False
+                
+    return True
+
+
 def infer_domain(doc_path):
     """Infer document domain label from path."""
     path = doc_path.replace("\\", "/").lower()
@@ -177,6 +233,18 @@ def chunk_document(data, config=None):
             if not sub_text:
                 continue
 
+            # --- Rule 16: Merge dependent chunks ---
+            import re
+            dep_markers = r"^(because|since|although|and|or|but)\b"
+            if re.match(dep_markers, sub_text, re.IGNORECASE) and chunks:
+                prev = chunks[-1]
+                prev_text = prev["text"]
+                combined_text = prev_text + " " + sub_text
+                if count_tokens(combined_text) <= hard_cap:
+                    prev["text"] = combined_text
+                    prev["chunk_id"] = generate_chunk_id(combined_text, doc_path)
+                    continue
+
             meta = dict(metadata)
             meta["block_type"] = btype
             meta["document"] = doc_path
@@ -202,10 +270,16 @@ def chunk_document(data, config=None):
 
     chunks = merge_small_chunks(chunks, min_chunk, hard_cap)
 
-    for idx, ch in enumerate(chunks):
+    drop_answers = cfg.get("drop_answers", False)
+    valid_chunks = []
+    for ch in chunks:
+        if is_valid_chunk(ch["text"], ch["metadata"], drop_answers):
+            valid_chunks.append(ch)
+
+    for idx, ch in enumerate(valid_chunks):
         ch["metadata"]["paragraph_id"] = idx
 
-    return chunks
+    return valid_chunks
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ Chains processing stages:
     4. Chunk into leaf chunks (chunk_documents)
     5. Generate parent chunks (parent_chunks)
 
-    python src/chunking/pipeline.py EDA_raw_documents/ output/chunks/ --stats
+    python src/chunking/pipeline.py EDA_raw_documents/ src/chunking/output/chunks/ --stats
 """
 
 import os
@@ -36,11 +36,7 @@ def discover_files(path):
     return files
 
 
-def print_stats(doc_path,
-                category,
-                blocks,
-                leaf_chunks,
-                parent_chunks):
+def print_stats(doc_path, category, blocks, leaf_chunks, parent_chunks):
     """Print per-document processing statistics."""
     from collections import Counter
 
@@ -75,11 +71,7 @@ def print_stats(doc_path,
         print(f"{bt}: {cnt}")
 
 
-def process_document(input_path,
-                     output_dir,
-                     dry_run=False,
-                     show_stats=False,
-                     config=None):
+def process_document(input_path, output_dir, base_input_path=None, dry_run=False, show_stats=False, config=None):
     """
     Run full preprocessing and chunking pipeline on a single merged JSON file.
     """
@@ -103,10 +95,26 @@ def process_document(input_path,
     base_name = base_name.replace(" merged_document", "")
 
     if not dry_run:
-        os.makedirs(output_dir, exist_ok=True)
+        out_target = output_dir
+        if base_input_path:
+            rel_path = os.path.relpath(os.path.dirname(input_path), base_input_path)
+            if rel_path != "." and rel_path != "":
+                parts = rel_path.replace("\\", "/").split("/")
+                top_folder = "general"  # default fallback
+                for part in parts:
+                    part_lower = part.lower()
+                    if part_lower == "ielts":
+                        top_folder = "ielts"
+                        break
+                    elif part_lower == "general english":
+                        top_folder = "general"
+                        break
+                out_target = os.path.join(output_dir, top_folder)
 
-        chunks_path = os.path.join(output_dir, f"{base_name}_chunks.jsonl")
-        parents_path = os.path.join(output_dir, f"{base_name}_parents.jsonl")
+        os.makedirs(out_target, exist_ok=True)
+
+        chunks_path = os.path.join(out_target, f"{base_name}_chunks.jsonl")
+        parents_path = os.path.join(out_target, f"{base_name}_parents.jsonl")
 
         with open(chunks_path, "w", encoding="utf-8") as f:
             for ch in leaf_chunks:
@@ -135,11 +143,7 @@ def process_document(input_path,
     }
 
 
-def run_pipeline(input_path,
-                 output_dir,
-                 dry_run=False,
-                 show_stats=False,
-                 config=None):
+def run_pipeline(input_path, output_dir, dry_run=False, show_stats=False, config=None):
     """
     Execute pipeline on a single file or directory of merged_document.json files.
     """
@@ -162,6 +166,7 @@ def run_pipeline(input_path,
         try:
             summary = process_document(
                 fp, output_dir,
+                base_input_path=input_path,
                 dry_run=dry_run,
                 show_stats=show_stats,
                 config=config,
@@ -202,17 +207,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="RAG preprocessing pipeline: classify -> clean -> parse -> chunk -> parent."
     )
-    parser.add_argument("input_path", help="Path to merged_document.json or directory.")
-    parser.add_argument("output_dir", help="Directory to write chunk JSONL files.")
+    parser.add_argument("input_path", nargs="?", default="EDA_raw_documents/", help="Path to merged_document.json or directory.")
+    parser.add_argument("output_dir", nargs="?", default="src/chunking/output", help="Directory to write chunk JSONL files.")
     parser.add_argument("--dry-run", action="store_true", help="Process without writing files.")
     parser.add_argument("--stats", action="store_true", help="Print per-document statistics.")
     parser.add_argument("--hard_cap", type=int, default=None)
     parser.add_argument("--soft_target", type=int, default=None)
     parser.add_argument("--overlap", type=int, default=None)
     parser.add_argument("--min_chunk", type=int, default=None)
+    parser.add_argument("--drop-answers", action="store_true", help="Drop answer_key chunks.")
     args = parser.parse_args()
 
     config = {}
+    if args.drop_answers:
+        config["drop_answers"] = True
     for key in ("hard_cap", "soft_target", "overlap", "min_chunk"):
         val = getattr(args, key, None)
         if val is not None:

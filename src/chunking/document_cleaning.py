@@ -210,6 +210,76 @@ def remove_page_artifacts(text):
     return "\n".join(out)
 
 
+def detect_global_duplicates(pages, threshold=20):
+    """Rule 7: Identify lines that repeat globally more than threshold times."""
+    counter = Counter()
+    for page_data in pages.values():
+        text = page_data.get("text", "")
+        if not text:
+            continue
+        for ln in text.split("\n"):
+            stripped = ln.strip()
+            if len(stripped) > 10:
+                counter[stripped] += 1
+    return {ln for ln, cnt in counter.items() if cnt > threshold}
+
+
+def remove_global_duplicates(text, global_dups):
+    """Rule 7: Remove global duplicates."""
+    if not global_dups:
+        return text
+    out = []
+    for ln in text.split("\n"):
+        if ln.strip() in global_dups:
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
+def remove_symbol_only_lines(text):
+    """Rule 12: Remove lines containing only symbols."""
+    out = []
+    for ln in text.split("\n"):
+        if re.match(r"^\s*[-=*_#@]{3,}\s*$", ln):
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
+def remove_repeated_characters(text):
+    """Rule 14: Remove sequences of repeated characters."""
+    return re.sub(r"(.)\1{4,}", "", text)
+
+
+def remove_high_special_char_ratio(text):
+    """Rule 13: Remove lines with high special character ratio (OCR errors)."""
+    out = []
+    for ln in text.split("\n"):
+        stripped = ln.strip()
+        if not stripped:
+            out.append(ln)
+            continue
+        letters = sum(1 for c in stripped if c.isalnum() or c.isspace())
+        if len(stripped) > 5 and letters / len(stripped) < 0.5:
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
+def remove_specific_footers(text):
+    """Rule 6: Remove specific known footers/headers."""
+    known = ["cambridge ielts", "oxford word skills", "www."]
+    out = []
+    for ln in text.split("\n"):
+        low_ln = ln.lower()
+        if len(ln) < 60 and any(k in low_ln for k in known):
+            continue
+        if re.search(r"\bpage\s+\d+\b", low_ln) and len(ln) < 20:
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
 def merge_broken_lines(text):
     """Rejoin lines broken across layout boundaries or soft hyphens."""
     text = text.replace("\u00ad", "")
@@ -343,7 +413,7 @@ def detect_table_regions(text):
     return regions
 
 
-def clean_page_text(text, category="general"):
+def clean_page_text(text, category="general", global_dups=None):
     """Apply all page-level text cleaning filters sequentially."""
     if not text:
         return ""
@@ -354,6 +424,15 @@ def clean_page_text(text, category="general"):
     text = remove_table_of_contents(text)
     text = remove_url_and_watermark(text)
     text = remove_page_artifacts(text)
+    
+    # Custom Rules
+    text = remove_specific_footers(text)
+    text = remove_symbol_only_lines(text)
+    text = remove_repeated_characters(text)
+    text = remove_high_special_char_ratio(text)
+    if global_dups:
+        text = remove_global_duplicates(text, global_dups)
+        
     text = remove_garbled_text(text, category)
     text = normalize_ocr_artifacts(text)
     text = merge_broken_lines(text)
@@ -381,6 +460,7 @@ def clean_document(input_data, category="general"):
 
     pages = filter_low_quality_ocr_pages(pages)
     header_set, footer_set = detect_headers_footers(pages)
+    global_dups = detect_global_duplicates(pages, threshold=20)
 
     for page_data in pages.values():
         text = page_data.get("text", "")
@@ -392,7 +472,7 @@ def clean_document(input_data, category="general"):
         if tables:
             page_data["table_regions"] = tables
 
-        page_data["text"] = clean_page_text(text, category)
+        page_data["text"] = clean_page_text(text, category, global_dups)
 
     output["pages"] = pages
     return output
