@@ -4,14 +4,78 @@ chunk_documents.py - Token-aware document chunker for the RAG pipeline.
 Splits typed blocks into token-budgeted leaf chunks with sentence overlap,
 table header repetition, and small chunk merging.
 
+V2 changes:
+  - Hardened is_valid_chunk(): publishing noise, template instructions,
+    page-ref-only chunks, stricter minimum
+  - Heading propagation: chunks inherit heading from predecessor when missing
+  - Post-process dedup for near-identical template chunks across units
+
 python src/chunking/chunk_documents.py output/structured.json output/leaf_chunks.jsonl
 """
 
 import json
 import hashlib
 import argparse
+import re
 
 from token_utils import count_tokens, split_into_sentences, chunk_config
+
+
+nlp = None
+
+# ---------------------------------------------------------------------------
+# Noise / boilerplate patterns (case-insensitive matching on text.lower())
+# ---------------------------------------------------------------------------
+
+# Publishing/copyright/metadata noise that slips through document_cleaning
+_NOISE_SUBSTRINGS = (
+    "all rights reserved",
+    "this publication is in copyright",
+    "printed in",
+    "isbn",
+    "published by",
+    "ptg01.indd",
+    "ptg01_hires",
+    "acknowledgement",
+    "acknowledgment",
+    "about the author",
+    "the publisher has used its best endeavors",
+    "no part of this publication",
+    "may be reproduced or distributed",
+    "first published",
+    "reprinted",
+)
+
+# Template instruction patterns that repeat across many units verbatim
+_TEMPLATE_RE = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r"^Do you remember the meanings of these words\?",
+        r"^(?:A\. )?The table contains word families",
+        r"^(?:A\. )?Choose the best answer for each question",
+        r"^(?:A\. )?Read the target words\.",
+        r"^(?:A\. )?Read the sentences and choose the word",
+        r"^(?:A\. )?Match each target word",
+        r"^Scope and Sequence",
+    )
+]
+
+# Page-reference-only chunks (e.g. "➜ Unit 6 Past simple and present perfect ➜ Units 12–14")
+_PAGE_REF_RE = re.compile(
+    r"^[\d\s➜→►▶•,;/&\-–—()\[\]]+"
+    r"(Unit|Page|Chapter|Section|Appendix|Exercise|Lesson)s?"
+    r"[\d\s➜→►▶•,;/&\-–—()\[\]]*$",
+    re.IGNORECASE,
+)
+
+
+def init_spacy():
+    global nlp
+    if nlp is None:
+        try:
+            import spacy
+            nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+        except Exception:
+            nlp = "fallback"
 
 
 def generate_chunk_id(text, doc_path=""):
@@ -135,59 +199,93 @@ def merge_small_chunks(chunks, min_tokens, hard_cap):
     return merged
 
 
-nlp = None
+def _is_noise_text(text_lower):
+    """Return True if text is publishing/copyright noise."""
+    return any(frag in text_lower for frag in _NOISE_SUBSTRINGS)
 
-def init_spacy():
-    global nlp
-    if nlp is None:
-        try:
-            import spacy
-            nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
-        except Exception:
-            nlp = "fallback"
+
+def _is_template_instruction(text):
+    """Return True if text matches a known repeated template instruction."""
+    return any(p.search(text) for p in _TEMPLATE_RE)
+
+
+def _is_page_ref_only(text):
+    """Return True if chunk is just cross-references to other units/pages."""
+    # Must be short and match the pattern
+    if len(text.split()) > 30:
+        return False
+    return bool(_PAGE_REF_RE.match(text.strip()))
+
 
 def is_valid_chunk(text, metadata, drop_answers=False):
-    """Filter out low-quality chunks based on various heuristics."""
-    import re
-    if drop_answers and metadata.get("block_type") == "answer_key":
+    """Filter out low-quality chunks based on various heuristics.
+    
+    V2 hardened: blocks publishing noise, template duplicates,
+    page-ref-only chunks, and applies stricter word minimums.
+    """
+    block_type = metadata.get("block_type", "")
+
+    # --- answer key filtering ---
+    if drop_answers and block_type == "answer_key":
         return False
-        
-    if re.match(r"^[A-Da-d][.)]?$", text.strip()):
+
+    stripped = text.strip()
+
+    # --- trivial single-token chunks ---
+    if re.match(r"^[A-Da-d][.)]?$", stripped):
         return False
-    if re.match(r"^\d+[.)]?$", text.strip()):
+    if re.match(r"^\d+[.)]?$", stripped):
         return False
-        
+
     words = text.split()
     word_count = len(words)
-    
-    if word_count < 20 and not metadata.get("heading"):
-        if metadata.get("block_type") not in ("table", "qa", "entry"):
-            return False
-            
+
+    # --- V2: stricter minimum word count ---
+    # Short-form types (table, qa, entry) get a lower bar
+    short_form_types = ("table", "qa", "entry")
+    min_words = 8 if block_type in short_form_types else 15
+    if word_count < min_words:
+        return False
+
+    # --- character composition checks ---
     letters = sum(1 for c in text if c.isalpha())
     digits = sum(1 for c in text if c.isdigit())
     chars = len(text)
-    
     if chars > 0:
         if letters / chars < 0.4:
             return False
         if digits / chars > 0.5:
             return False
-            
+
+    # --- word uniqueness (catches repetitive noise) ---
     if word_count > 0:
-        unique_ratio = len(set([w.lower() for w in words])) / word_count
+        unique_ratio = len(set(w.lower() for w in words)) / word_count
         if unique_ratio < 0.3:
             return False
-            
+
+    # --- V2: publishing/copyright noise ---
+    text_lower = text.lower()
+    if _is_noise_text(text_lower):
+        return False
+
+    # --- V2: repeated template instructions ---
+    if _is_template_instruction(text):
+        return False
+
+    # --- V2: page-reference-only chunks ---
+    if _is_page_ref_only(text):
+        return False
+
+    # --- spaCy POS check (verb+noun requirement) ---
     init_spacy()
     if nlp and nlp != "fallback":
         doc = nlp(text)
-        has_verb = any(token.pos_ == "VERB" or token.pos_ == "AUX" for token in doc)
-        has_noun = any(token.pos_ == "NOUN" or token.pos_ == "PROPN" for token in doc)
+        has_verb = any(token.pos_ in ("VERB", "AUX") for token in doc)
+        has_noun = any(token.pos_ in ("NOUN", "PROPN") for token in doc)
         if not (has_verb and has_noun):
-            if metadata.get("block_type") not in ("table", "entry", "qa", "exercise"): 
+            if block_type not in ("table", "entry", "qa", "exercise"):
                 return False
-                
+
     return True
 
 
@@ -199,9 +297,75 @@ def infer_domain(doc_path):
     return "General English"
 
 
+def _propagate_headings(chunks):
+    """V2: Propagate heading from predecessor when a chunk has no heading.
+    
+    Many chunks end up with heading=None because the structural parser only
+    assigns a heading when a heading line immediately precedes the paragraph.
+    For consecutive chunks in the same chapter/document, we carry the last
+    known heading forward so that downstream tasks (query generation,
+    retrieval) have richer context.
+    """
+    last_heading = None
+    last_doc = None
+    last_chapter = None
+
+    for ch in chunks:
+        meta = ch["metadata"]
+        doc = meta.get("document")
+        chapter = meta.get("chapter")
+
+        # Reset when document or chapter changes
+        if doc != last_doc or chapter != last_chapter:
+            last_heading = None
+            last_doc = doc
+            last_chapter = chapter
+
+        if meta.get("heading"):
+            last_heading = meta["heading"]
+        elif last_heading:
+            meta["heading"] = last_heading
+
+    return chunks
+
+
+def _dedup_near_identical(chunks, similarity_threshold=0.95):
+    """V2: Remove near-identical template chunks that repeat across units.
+    
+    Keeps the first occurrence and drops subsequent chunks whose text is
+    almost identical (by character-level set overlap). This catches the
+    "Do you remember the meanings..." pattern (49 copies) and similar.
+    """
+    seen_texts = {}  # normalized_prefix -> index of first occurrence
+    keep = []
+
+    for ch in chunks:
+        text = ch["text"].strip()
+        # Use first 200 chars as dedup key (enough to catch templates)
+        prefix = text[:200].lower()
+        word_count = len(text.split())
+
+        # Only dedup short template-like chunks (< 40 words)
+        if word_count < 40 and prefix in seen_texts:
+            continue
+
+        if word_count < 40:
+            seen_texts[prefix] = True
+
+        keep.append(ch)
+
+    removed = len(chunks) - len(keep)
+    if removed > 0:
+        print(f"  [dedup] Removed {removed} near-identical template chunks")
+
+    return keep
+
+
 def chunk_document(data, config=None):
     """
     Chunk structured document blocks into token-budgeted leaf chunks.
+    
+    V2: adds heading propagation and near-duplicate dedup.
     """
     cfg = {**chunk_config, **(config or {})}
     hard_cap = cfg["hard_cap"]
@@ -213,6 +377,8 @@ def chunk_document(data, config=None):
 
     chunks = []
     chunk_index = 0
+
+    dep_markers_re = re.compile(r"^(because|since|although|and|or|but)\b", re.IGNORECASE)
 
     for block_idx, block in enumerate(blocks):
         btype = block["type"]
@@ -234,9 +400,7 @@ def chunk_document(data, config=None):
                 continue
 
             # --- Rule 16: Merge dependent chunks ---
-            import re
-            dep_markers = r"^(because|since|although|and|or|but)\b"
-            if re.match(dep_markers, sub_text, re.IGNORECASE) and chunks:
+            if dep_markers_re.match(sub_text) and chunks:
                 prev = chunks[-1]
                 prev_text = prev["text"]
                 combined_text = prev_text + " " + sub_text
@@ -270,11 +434,17 @@ def chunk_document(data, config=None):
 
     chunks = merge_small_chunks(chunks, min_chunk, hard_cap)
 
+    # --- V2: Heading propagation (before filtering so heading info is available) ---
+    chunks = _propagate_headings(chunks)
+
     drop_answers = cfg.get("drop_answers", False)
     valid_chunks = []
     for ch in chunks:
         if is_valid_chunk(ch["text"], ch["metadata"], drop_answers):
             valid_chunks.append(ch)
+
+    # --- V2: Dedup near-identical template chunks ---
+    valid_chunks = _dedup_near_identical(valid_chunks)
 
     for idx, ch in enumerate(valid_chunks):
         ch["metadata"]["paragraph_id"] = idx
