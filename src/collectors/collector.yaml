@@ -1,0 +1,39 @@
+# Collectors Configuration
+# API endpoints, request settings, and parameters for LoL Knowledge Bot collectors
+
+settings:
+  request_delay: 0.15          # Delay between requests in seconds (rate limiting)
+  request_timeout: 30          # HTTP timeout in seconds
+  max_retries: 3               # Max retries for failed HTTP requests
+  language: "en_US"            # Default language for Riot APIs
+  user_agent: "LoLKnowledgeBot/1.0 (Educational Project)"
+
+paths:
+  raw_dir: "./raw"             # Path to store raw data relative to collectors directory
+
+sources:
+  ddragon:
+    name: "Data Dragon"
+    base_url: "https://ddragon.leagueoflegends.com"
+    versions_url: "https://ddragon.leagueoflegends.com/api/versions.json"
+    cdn_template: "{base_url}/cdn/{version}/data/{language}/{endpoint}"
+    endpoints:
+      champions: "champion.json"
+      champion_detail: "champion/{id}.json"
+      items: "item.json"
+      runes: "runesReforged.json"
+
+  cdragon:
+    name: "Community Dragon"
+    base_url: "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1"
+    endpoints:
+      champion_summary: "champion-summary.json"
+      champion_detail: "champions/{id}.json"
+      items: "items.json"
+
+  meraki:
+    name: "Meraki Analytics"
+    base_url: "https://cdn.merakianalytics.com/riot/lol/resources/latest/en-US"
+    endpoints:
+      champions: "champions.json"
+      items: "items.json"
