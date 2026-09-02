@@ -16,12 +16,14 @@ sources:
     name: "Data Dragon"
     base_url: "https://ddragon.leagueoflegends.com"
     versions_url: "https://ddragon.leagueoflegends.com/api/versions.json"
+    default_version: "16.17.1"
     cdn_template: "{base_url}/cdn/{version}/data/{language}/{endpoint}"
     endpoints:
       champions: "champion.json"
       champion_detail: "champion/{id}.json"
       items: "item.json"
       runes: "runesReforged.json"
+
 
   cdragon:
     name: "Community Dragon"
@@ -37,3 +39,11 @@ sources:
     endpoints:
       champions: "champions.json"
       items: "items.json"
+
+  universe:
+    name: "Riot Universe"
+    base_url: "https://universe-meeps.leagueoflegends.com/v1/en_us"
+    endpoints:
+      champion_browse: "champion-browse/index.json"
+      champion_detail: "champions/{slug}/index.json"
+

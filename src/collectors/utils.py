@@ -5,7 +5,7 @@ Provides common helper functions across collectors:
 - Configuration management (YAML loader, setting extractors, path resolvers).
 - HTTP session management (shared session, persistent headers).
 - Safe HTTP requests (exponential backoff retry, rate-limiting, error handling).
-- Dynamic URL builders for Data Dragon, Community Dragon, and Meraki Analytics.
+- Dynamic URL builders for Data Dragon, Community Dragon, Meraki Analytics, and Riot Universe.
 - JSON file I/O utilities (safe save, load, cache checks).
 """
 
@@ -18,11 +18,7 @@ import requests
 import yaml
 
 
-# ============================================================================
-# 1. CONFIGURATION MANAGEMENT & PATHS
-# ============================================================================
-
-def find_config_path() -> Path:
+def find_config_path():
     """Locate the collector configuration file (`collector.yaml` or `config.yaml`)."""
     collectors_dir = Path(__file__).parent
     collector_yaml = collectors_dir / "collector.yaml"
@@ -43,34 +39,36 @@ CONFIG_PATH = find_config_path()
 CONFIG: Optional[Dict[str, Any]] = None
 SESSION: Optional[requests.Session] = None
 LAST_REQUEST_TIME: float = 0.0
+CACHED_DDRAGON_VERSION: Optional[str] = None
 
 
-def load_collector_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+
+def load_collector_config(config_path = None):
     """Load and parse configuration from the YAML file. Caches the parsed dictionary in memory."""
     global CONFIG
     if CONFIG is None:
         path = config_path or find_config_path()
         if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding = "utf-8") as f:
                 CONFIG = yaml.safe_load(f) or {}
         else:
             CONFIG = {}
     return CONFIG
 
 
-def get_setting(key: str, default: Any = None) -> Any:
+def get_setting(key, default = None):
     """Retrieve a global setting from the 'settings' section of the YAML configuration."""
     config = load_collector_config()
     return config.get("settings", {}).get(key, default)
 
 
-def get_source_config(source_name: str) -> Dict[str, Any]:
-    """Retrieve configuration for a specific data source (e.g., 'ddragon', 'cdragon', 'meraki')."""
+def get_source_config(source_name):
+    """Retrieve configuration for a specific data source (e.g., 'ddragon', 'cdragon', 'meraki', 'universe')."""
     config = load_collector_config()
     return config.get("sources", {}).get(source_name, {})
 
 
-def get_raw_dir(source_name: Optional[str] = None) -> Path:
+def get_raw_dir(source_name):
     """
     Get the raw data storage directory inside collectors.
     Resolves `paths.raw_dir` from collector.yaml relative to collectors folder.
@@ -85,7 +83,7 @@ def get_raw_dir(source_name: Optional[str] = None) -> Path:
     else:
         target = base_raw
 
-    target.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents = True, exist_ok = True)
     return target
 
 
@@ -93,14 +91,11 @@ def get_raw_dir(source_name: Optional[str] = None) -> Path:
 DDRAGON_RAW_DIR = get_raw_dir("ddragon")
 CDRAGON_RAW_DIR = get_raw_dir("cdragon")
 MERAKI_RAW_DIR = get_raw_dir("meraki")
-WIKI_RAW_DIR = get_raw_dir("wiki")
+LORE_RAW_DIR = get_raw_dir("lore")
 
 
-# ============================================================================
-# 2. SESSION MANAGEMENT & LOGGING
-# ============================================================================
 
-def get_session() -> requests.Session:
+def get_session():
     """Get or initialize a shared requests.Session singleton."""
     global SESSION
     if SESSION is None:
@@ -113,23 +108,12 @@ def get_session() -> requests.Session:
     return SESSION
 
 
-def log(tag: str, message: str) -> None:
+def log(tag, message):
     """Print a standardized log message with a collector tag prefix."""
     print(f"[{tag}] {message}")
 
 
-# ============================================================================
-# 3. HTTP REQUESTS (RATE LIMITING & RETRY LOGIC)
-# ============================================================================
-
-def fetch_json(
-    url: str,
-    session: Optional[requests.Session] = None,
-    retries: Optional[int] = None,
-    delay: Optional[float] = None,
-    timeout: Optional[int] = None,
-    tag: str = "Collector",
-) -> Optional[Any]:
+def fetch_json(url, session = None, retries = None, delay = None, timeout = None, tag = "Collector"):
     """Fetch and parse JSON from a URL with built-in rate-limiting, retries, and error handling."""
     global LAST_REQUEST_TIME
     sess = session or get_session()
@@ -149,7 +133,7 @@ def fetch_json(
             LAST_REQUEST_TIME = time.time()
 
             # Perform HTTP GET request.
-            response = sess.get(url, timeout=timeout)
+            response = sess.get(url, timeout = timeout)
             response.raise_for_status()
             return response.json()
 
@@ -186,28 +170,31 @@ def fetch_json(
     return None
 
 
-# ============================================================================
-# 4. DYNAMIC URL BUILDERS (Read directly from collector.yaml)
-# ============================================================================
+def get_latest_ddragon_version():
+    """Fetch and cache the latest Data Dragon patch version string from Riot API or collector.yaml."""
+    global CACHED_DDRAGON_VERSION
+    if CACHED_DDRAGON_VERSION is not None:
+        return CACHED_DDRAGON_VERSION
 
-def get_latest_ddragon_version() -> str:
-    """Fetch the latest Data Dragon patch version string using versions_url from collector.yaml."""
     dd_conf = get_source_config("ddragon")
     versions_url = dd_conf.get("versions_url")
-    if not versions_url:
-        log("DDragon", "Missing 'versions_url' in collector.yaml")
-        return "15.15.1"
+    default_version = dd_conf.get("default_version")
 
-    try:
-        versions = fetch_json(versions_url, tag="DDragon", retries=2, timeout=10)
-        if versions and isinstance(versions, list):
-            return str(versions[0])
-    except Exception as e:
-        log("DDragon", f"Could not fetch latest version: {e}")
-    return "15.15.1"
+    if versions_url:
+        try:
+            versions = fetch_json(versions_url, tag = "DDragon", retries = 2, timeout = 10)
+            if versions and isinstance(versions, list) and len(versions) > 0:
+                CACHED_DDRAGON_VERSION = str(versions[0])
+                return CACHED_DDRAGON_VERSION
+        except Exception as e:
+            log("DDragon", f"Could not fetch latest version from Riot API: {e}")
+
+    CACHED_DDRAGON_VERSION = default_version
+    return CACHED_DDRAGON_VERSION
 
 
-def build_ddragon_url(endpoint_key: str, version: str, **kwargs) -> str:
+
+def build_ddragon_url(endpoint_key, version, **kwargs):
     """Construct a complete Riot Data Dragon URL strictly from collector.yaml templates."""
     dd_conf = get_source_config("ddragon")
     base_url = dd_conf.get("base_url", "")
@@ -217,7 +204,7 @@ def build_ddragon_url(endpoint_key: str, version: str, **kwargs) -> str:
     return f"{base_url}/cdn/{version}/data/{language}/{endpoint}"
 
 
-def build_cdragon_url(endpoint_key: str, **kwargs) -> str:
+def build_cdragon_url(endpoint_key, **kwargs):
     """Construct a complete Community Dragon URL strictly from collector.yaml templates."""
     cd_conf = get_source_config("cdragon")
     base_url = cd_conf.get("base_url", "")
@@ -226,7 +213,7 @@ def build_cdragon_url(endpoint_key: str, **kwargs) -> str:
     return f"{base_url}/{endpoint}"
 
 
-def build_meraki_url(endpoint_key: str, **kwargs) -> str:
+def build_meraki_url(endpoint_key, **kwargs):
     """Construct a complete Meraki Analytics CDN URL strictly from collector.yaml templates."""
     mk_conf = get_source_config("meraki")
     base_url = mk_conf.get("base_url", "")
@@ -235,26 +222,32 @@ def build_meraki_url(endpoint_key: str, **kwargs) -> str:
     return f"{base_url}/{endpoint}"
 
 
-# ============================================================================
-# 5. JSON FILE I/O HELPERS
-# ============================================================================
+def build_universe_url(endpoint_key, **kwargs):
+    """Construct a complete Riot Universe URL strictly from collector.yaml templates."""
+    uv_conf = get_source_config("universe")
+    base_url = uv_conf.get("base_url", "")
+    endpoint_template = uv_conf.get("endpoints", {}).get(endpoint_key, endpoint_key)
+    endpoint = endpoint_template.format(**kwargs) if "{" in endpoint_template else endpoint_template
+    return f"{base_url}/{endpoint}"
 
-def save_json(data: Any, filepath: Path, indent: int = 2) -> Path:
+
+
+def save_json(data, filepath, indent = 2):
     """Serialize and save Python data structure to a JSON file."""
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=indent, ensure_ascii=False)
+    filepath.parent.mkdir(parents = True, exist_ok = True)
+    with open(filepath, "w", encoding = "utf-8") as f:
+        json.dump(data, f, indent = indent, ensure_ascii = False)
     return filepath
 
 
-def load_json(filepath: Path) -> Optional[Any]:
+def load_json(filepath):
     """Load and deserialize a JSON file from disk. Returns None if file does not exist."""
     if filepath.exists():
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding = "utf-8") as f:
             return json.load(f)
     return None
 
 
-def has_cached(filepath: Path) -> bool:
+def has_cached(filepath):
     """Check if a cached file exists at the given path."""
     return filepath.exists()

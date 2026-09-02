@@ -12,14 +12,15 @@ from pathlib import Path
 from collectors import (
     cdragon,
     ddragon,
+    lore,
     meraki,
-    wiki_lore,
 )
 from collectors.main import run_all_collectors
 from collectors.utils import (
     build_cdragon_url,
     build_ddragon_url,
     build_meraki_url,
+    build_universe_url,
     find_config_path,
     get_session,
     get_setting,
@@ -59,7 +60,7 @@ class TestCollectorsModule(unittest.TestCase):
 
     def test_source_configs(self):
         """Test retrieving source configuration for each provider."""
-        sources = ["ddragon", "cdragon", "meraki"]
+        sources = ["ddragon", "cdragon", "meraki", "universe"]
         for source in sources:
             conf = get_source_config(source)
             self.assertIsInstance(conf, dict, f"Source '{source}' config should be a dict")
@@ -98,6 +99,16 @@ class TestCollectorsModule(unittest.TestCase):
         url_champions = build_meraki_url("champions")
         self.assertTrue(url_champions.endswith("/champions.json"))
         self.assertIn("merakianalytics.com", url_champions)
+
+    def test_universe_url_builder(self):
+        """Test building Riot Universe URLs."""
+        url_browse = build_universe_url("champion_browse")
+        self.assertTrue(url_browse.endswith("/champion-browse/index.json"))
+        self.assertIn("universe-meeps.leagueoflegends.com", url_browse)
+
+        url_detail = build_universe_url("champion_detail", slug="yasuo")
+        self.assertTrue(url_detail.endswith("/champions/yasuo/index.json"))
+
 
     def test_session_configuration(self):
         """Test shared session setup and headers."""
@@ -141,7 +152,7 @@ class TestCollectorsModule(unittest.TestCase):
         self.assertTrue(callable(meraki.collect_meraki))
         self.assertTrue(callable(meraki.collect_champions))
 
-        self.assertTrue(callable(wiki_lore.collect_wiki_lore))
+        self.assertTrue(callable(lore.collect_lore))
         self.assertTrue(callable(run_all_collectors))
 
 
