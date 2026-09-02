@@ -17,35 +17,47 @@ try:
     from .utils import (
         CDRAGON_RAW_DIR,
         DDRAGON_RAW_DIR,
+        LORE_RAW_DIR,
         MERAKI_RAW_DIR,
         PROCESSED_DIR,
-        WIKI_RAW_DIR,
         load_json,
         save_json,
         log,
+        normalize_champion_id,
+        get_champion_aliases,
+        build_lore_key_map,
+        clean_html,
     )
 except ImportError:
     try:
         from processors.utils import (
             CDRAGON_RAW_DIR,
             DDRAGON_RAW_DIR,
+            LORE_RAW_DIR,
             MERAKI_RAW_DIR,
             PROCESSED_DIR,
-            WIKI_RAW_DIR,
             load_json,
             save_json,
             log,
+            normalize_champion_id,
+            get_champion_aliases,
+            build_lore_key_map,
+            clean_html,
         )
     except ImportError:
         from utils import (
             CDRAGON_RAW_DIR,
             DDRAGON_RAW_DIR,
+            LORE_RAW_DIR,
             MERAKI_RAW_DIR,
             PROCESSED_DIR,
-            WIKI_RAW_DIR,
             load_json,
             save_json,
             log,
+            normalize_champion_id,
+            get_champion_aliases,
+            build_lore_key_map,
+            clean_html,
         )
 
 
@@ -111,15 +123,31 @@ class ChampionMerger:
         tactical = parsed_cd.get("tacticalInfo", {})
         playstyle_ratings = parsed_cd.get("playstyleInfo", {})
 
+        # Lore: prioritize dedicated lore source, fallback to DDragon/Meraki
         champion_lore = raw_lore.get("lore", "") or parsed_dd.get("lore", "") or parsed_mk.get("lore", "")
         short_lore = raw_lore.get("shortLore", "") or parsed_dd.get("blurb", "") or parsed_cd.get("shortBio", "")
+        region = raw_lore.get("region", "Runeterra (Unaffiliated)")
+        faction_slug = raw_lore.get("faction_slug", "unaffiliated")
+        quote = raw_lore.get("quote", "")
+        related_champions = raw_lore.get("related_champions", [])
+
+        # Build aliases list for search enrichment
+        aliases = get_champion_aliases(champ_id)
+        # Always include the display name if it differs from the ID
+        if name and name != champ_id and name not in aliases:
+            aliases.insert(0, name)
 
         return {
             "id": champ_id,
             "name": name,
             "title": title,
+            "aliases": aliases,
             "lore": champion_lore,
             "shortLore": short_lore,
+            "region": region,
+            "faction_slug": faction_slug,
+            "quote": quote,
+            "related_champions": related_champions,
             "roles": roles,
             "resource": parsed_mk.get("resource", "") or parsed_dd.get("partype", ""),
             "attackType": parsed_mk.get("attackType", ""),
@@ -144,7 +172,7 @@ class ChampionMerger:
         passive = raw.get("passive", {})
         abilities["passive"] = {
             "name": passive.get("name", ""),
-            "description": self.clean_html(passive.get("description", "")),
+            "description": clean_html(passive.get("description", "")),
             "image": passive.get("image", {}).get("full", ""),
         }
 
@@ -153,7 +181,7 @@ class ChampionMerger:
             if i < len(spell_keys):
                 abilities[spell_keys[i]] = {
                     "name": spell.get("name", ""),
-                    "description": self.clean_html(spell.get("description", "")),
+                    "description": clean_html(spell.get("description", "")),
                     "tooltip": spell.get("tooltip", ""),
                     "cooldown": spell.get("cooldown", []),
                     "cost": spell.get("cost", []),
@@ -189,7 +217,7 @@ class ChampionMerger:
         passive = detail.get("passive", {})
         abilities["passive"] = {
             "name": passive.get("name", ""),
-            "description": self.clean_html(passive.get("description", "")),
+            "description": clean_html(passive.get("description", "")),
         }
 
         spell_keys = ["Q", "W", "E", "R"]
@@ -197,7 +225,7 @@ class ChampionMerger:
             if i < len(spell_keys):
                 abilities[spell_keys[i]] = {
                     "name": spell.get("name", ""),
-                    "description": self.clean_html(spell.get("description", "")),
+                    "description": clean_html(spell.get("description", "")),
                 }
 
         tactical = detail.get("tacticalInfo", {})
@@ -249,8 +277,9 @@ class ChampionMerger:
             p = passive_data[0] if isinstance(passive_data, list) else passive_data
             abilities["passive"] = {
                 "name": p.get("name", ""),
-                "description": self.clean_html(p.get("description", "")),
+                "description": clean_html(p.get("description", "")),
                 "icon": p.get("icon", ""),
+                "effects": p.get("effects", []),
             }
 
         for key in ["Q", "W", "E", "R"]:
@@ -259,10 +288,11 @@ class ChampionMerger:
                 spell = spell_data[0] if isinstance(spell_data, list) else spell_data
                 abilities[key] = {
                     "name": spell.get("name", ""),
-                    "description": self.clean_html(spell.get("description", "")),
+                    "description": clean_html(spell.get("description", "")),
                     "icon": spell.get("icon", ""),
                     "cooldown": self.extract_meraki_scaling(spell.get("cooldown", {})),
                     "cost": self.extract_meraki_scaling(spell.get("cost", {})),
+                    "costType": spell.get("costType", ""),
                     "effects": spell.get("effects", []),
                 }
 
@@ -349,7 +379,7 @@ class ChampionMerger:
         return {}
 
     def merge_abilities(self, dd_abilities, cd_abilities, mk_abilities):
-        """Merge abilities from all sources."""
+        """Merge abilities from all sources. Now includes scaling effects & icons."""
         merged = {}
         all_keys = {"passive", "Q", "W", "E", "R"}
 
@@ -373,12 +403,23 @@ class ChampionMerger:
 
             if key != "passive":
                 ability["cooldown"] = mk_spell.get("cooldown") or dd_spell.get("cooldown", [])
-                ability["cost"] = dd_spell.get("cost", [])
+                # Meraki cost is more accurate (includes cost type like % health)
+                ability["cost"] = mk_spell.get("cost") or dd_spell.get("cost", [])
                 ability["range"] = dd_spell.get("range", [])
                 ability["maxrank"] = dd_spell.get("maxrank", 5 if key != "R" else 3)
 
             if dd_spell.get("tooltip"):
                 ability["tooltip"] = dd_spell["tooltip"]
+
+            # Ability icon: DDragon image > Meraki icon
+            icon = dd_spell.get("image", "") or mk_spell.get("icon", "")
+            if icon:
+                ability["image"] = icon
+
+            # Meraki scaling effects (AD/AP ratios, % max health damage, etc.)
+            mk_effects = mk_spell.get("effects", [])
+            if mk_effects:
+                ability["scalingEffects"] = mk_effects
 
             merged[key] = ability
 
@@ -395,42 +436,45 @@ class ChampionMerger:
             sources.append("meraki")
         return sources
 
-    @staticmethod
-    def clean_html(text):
-        """Remove HTML tags from game descriptions."""
-        if not text:
-            return ""
-        cleaned = re.sub(r"<[^>]+>", "", text)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned
-
     def load_sources(self):
-        """Load all raw data from disk and normalize keys."""
+        """Load all raw data from disk and normalize keys using the alias registry."""
         self.ddragon_data = self.load_json(DDRAGON_RAW_DIR / "champions.json") or {}
         raw_cd = self.load_json(CDRAGON_RAW_DIR / "champions.json") or {}
         self.meraki_data = self.load_json(MERAKI_RAW_DIR / "champions.json") or {}
-        raw_lore = self.load_json(WIKI_RAW_DIR / "lore.json") or {}
+        raw_lore = self.load_json(LORE_RAW_DIR / "lore.json") or {}
 
-        # Normalize and filter CDragon (filter out Jade_* Wild Rift entries, normalize FiddleSticks -> Fiddlesticks)
+        # Normalize CDragon keys using alias registry (handles FiddleSticks→Fiddlesticks, filters Jade_*)
         self.cdragon_data = {}
         for k, v in raw_cd.items():
-            if k.startswith("Jade_"):
-                continue
-            key = "Fiddlesticks" if k == "FiddleSticks" else k
-            self.cdragon_data[key] = v
+            canonical = normalize_champion_id(k)
+            if canonical:
+                self.cdragon_data[canonical] = v
 
-        # Normalize lore data keys as well
+        # Build master IDs from DDragon + normalized CDragon
+        master_ids = set(self.ddragon_data.keys()) | set(self.cdragon_data.keys())
+
+        # Normalize lore data keys with smart mapping (handles RenataGlasc→Renata, etc.)
+        lore_key_map = build_lore_key_map(set(raw_lore.keys()), master_ids)
         self.lore_data = {}
-        for k, v in raw_lore.items():
-            if k.startswith("Jade_"):
-                continue
-            key = "Fiddlesticks" if k == "FiddleSticks" else k
-            self.lore_data[key] = v
+        for lk, v in raw_lore.items():
+            canonical = lore_key_map.get(lk)
+            if canonical:
+                self.lore_data[canonical] = v
+            else:
+                # Direct match fallback
+                normalized = normalize_champion_id(lk)
+                if normalized and normalized in master_ids:
+                    self.lore_data[normalized] = v
 
         print(f"  DDragon: {len(self.ddragon_data)} champions")
-        print(f"  CDragon: {len(self.cdragon_data)} champions (filtered)")
+        print(f"  CDragon: {len(self.cdragon_data)} champions (normalized)")
         print(f"  Meraki:  {len(self.meraki_data)} champions")
-        print(f"  Lore:    {len(self.lore_data)} entries (filtered)")
+        print(f"  Lore:    {len(self.lore_data)} entries (normalized)")
+
+        # Report lore coverage gaps
+        missing_lore = master_ids - set(self.lore_data.keys())
+        if missing_lore:
+            print(f"  [WARN] Champions missing lore data: {sorted(missing_lore)}")
 
     def save(self, data):
         """Save merged data to processed directory."""
@@ -446,4 +490,3 @@ class ChampionMerger:
             with open(path, "r", encoding = "utf-8") as f:
                 return json.load(f)
         return {}
-

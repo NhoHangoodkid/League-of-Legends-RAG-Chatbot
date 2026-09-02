@@ -21,6 +21,8 @@ try:
         load_json,
         save_json,
         log,
+        clean_html,
+        normalize_item_stats,
     )
 except ImportError:
     try:
@@ -31,6 +33,8 @@ except ImportError:
             load_json,
             save_json,
             log,
+            clean_html,
+            normalize_item_stats,
         )
     except ImportError:
         from utils import (
@@ -40,8 +44,43 @@ except ImportError:
             load_json,
             save_json,
             log,
+            clean_html,
+            normalize_item_stats,
         )
 
+
+# Common item shorthand aliases for search enrichment
+ITEM_ALIASES = {
+    # Mythic / Legendary common abbreviations
+    "Infinity Edge": ["IE", "Vô Cực Kiếm"],
+    "Rabadon's Deathcap": ["Rabadon", "Deathcap", "Mũ phù thủy"],
+    "Zhonya's Hourglass": ["Zhonya", "Zhonyas", "Đồng hồ cát"],
+    "Guardian Angel": ["GA", "Thiên thần"],
+    "Blade of the Ruined King": ["BOTRK", "BotRK", "Kiếm vua hủy diệt"],
+    "Thornmail": ["Giáp gai"],
+    "Randuin's Omen": ["Randuin", "Randuins"],
+    "Dead Man's Plate": ["DMP", "Deadmans"],
+    "Spirit Visage": ["SV", "Áo linh hồn"],
+    "Warmog's Armor": ["Warmog", "Warmogs"],
+    "Banshee's Veil": ["Banshee", "Banshees"],
+    "Morellonomicon": ["Morello"],
+    "Hextech Rocketbelt": ["Rocketbelt", "Protobelt"],
+    "Luden's Companion": ["Luden", "Ludens"],
+    "Trinity Force": ["Triforce", "TF item", "Tam hợp kiếm"],
+    "Black Cleaver": ["BC", "Rìu đen"],
+    "Death's Dance": ["DD"],
+    "Sterak's Gage": ["Sterak", "Steraks"],
+    "Kraken Slayer": ["Kraken"],
+    "Phantom Dancer": ["PD"],
+    "Rapid Firecannon": ["RFC"],
+    "Statikk Shiv": ["Shiv", "Statikk"],
+    "Mercurial Scimitar": ["Mercurial", "QSS upgrade"],
+    "Quicksilver Sash": ["QSS"],
+    "Plated Steelcaps": ["Tabi", "Ninja Tabi"],
+    "Mercury's Treads": ["Mercs", "Mercury"],
+    "Berserker's Greaves": ["Berserker", "Berserkers"],
+    "Sorcerer's Shoes": ["Sorcs"],
+}
 
 
 class ItemMerger:
@@ -81,10 +120,15 @@ class ItemMerger:
     def merge_item(self, item_id, dd, cd):
         """Merge a single item from DDragon + CDragon raw data."""
         name = dd.get("name", "") or cd.get("name", "")
+        # Clean HTML from name (some items have <font> tags in name)
+        name = clean_html(name)
 
-        description = self.clean_html(dd.get("description", ""))
-        plaintext = dd.get("plaintext", "") or cd.get("description", "")
-        stats = dd.get("stats", {})
+        description = clean_html(dd.get("description", ""))
+        plaintext = dd.get("plaintext", "") or clean_html(cd.get("description", ""))
+
+        # Normalize stat keys from Riot internal format to human-readable
+        raw_stats = dd.get("stats", {})
+        stats = normalize_item_stats(raw_stats)
 
         gold = dd.get("gold", dd.get("cost", {}))
         total_cost = gold.get("total", cd.get("priceTotal", 0))
@@ -99,9 +143,13 @@ class ItemMerger:
 
         image = dd.get("image", {}).get("full", "") if isinstance(dd.get("image"), dict) else dd.get("image", "")
 
+        # Lookup aliases for this item
+        aliases = ITEM_ALIASES.get(name, [])
+
         return {
             "id": int(item_id) if str(item_id).isdigit() else item_id,
             "name": name,
+            "aliases": aliases,
             "description": description,
             "plaintext": plaintext,
             "cost": {
@@ -141,19 +189,9 @@ class ItemMerger:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     @staticmethod
-    def clean_html(text):
-        """Remove HTML tags from text."""
-        if not text:
-            return ""
-        cleaned = re.sub(r"<[^>]+>", "", text)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned
-
-    @staticmethod
     def load_json(path):
         """Load JSON file."""
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
-

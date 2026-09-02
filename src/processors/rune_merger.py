@@ -2,6 +2,7 @@
 Rune Data Merger.
 
 Processes and structures pure raw rune data from DDragon (runesReforged.json).
+Cleans HTML from descriptions and organizes by ID and tree.
 
 Output: src/processors/processed/runes.json
 """
@@ -11,12 +12,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 try:
-    from .utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log
+    from .utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
 except ImportError:
     try:
-        from processors.utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log
+        from processors.utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
     except ImportError:
-        from utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log
+        from utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
 
 
 
@@ -53,8 +54,9 @@ class RuneMerger:
                             "tree": tree_name,
                             "treeId": tree_id,
                             "slot": slot_index,
-                            "description": rune.get("shortDesc", ""),
-                            "longDescription": rune.get("longDesc", ""),
+                            # Clean HTML from descriptions
+                            "description": clean_html(rune.get("shortDesc", "")),
+                            "longDescription": clean_html(rune.get("longDesc", "")),
                             "icon": rune.get("icon", ""),
                             "source": "ddragon",
                         }
@@ -64,6 +66,11 @@ class RuneMerger:
             # Already flattened dict
             runes_flat = raw_runes
             for rune_id, rune in raw_runes.items():
+                # Clean HTML from any existing descriptions
+                if "description" in rune:
+                    rune["description"] = clean_html(rune["description"])
+                if "longDescription" in rune:
+                    rune["longDescription"] = clean_html(rune["longDescription"])
                 tree = rune.get("tree", "Unknown")
                 if tree not in runes_by_tree:
                     runes_by_tree[tree] = []
