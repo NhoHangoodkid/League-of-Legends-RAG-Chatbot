@@ -1,0 +1,70 @@
+# League of Legends RAG — LoRA Embedding Training Configuration
+
+model:
+  base_model: "BAAI/bge-small-en-v1.5"
+  dimension: 384
+  max_seq_length: 512
+  normalized: true
+
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.1
+  target_modules:
+    - "query"
+    - "key"
+    - "value"
+  bias: "none"
+  task_type: "FEATURE_EXTRACTION"
+
+training:
+  epochs: 3
+  batch_size: 32            # Optimized for 6GB VRAM (e.g., RTX 4050)
+  learning_rate: 0.0002     # 2e-4
+  warmup_ratio: 0.1
+  eval_split: 0.1
+  fp16: true                # Mixed precision for GPU acceleration
+  loss: "MultipleNegativesRankingLoss"
+  evaluation_steps: 100
+  save_total_limit: 2
+
+paths:
+  training_data: "src/training/train.jsonl"
+  val_data: "src/training/val.jsonl"
+  test_data: "src/training/test.jsonl"
+  fallback_training_data: "src/data/training/train.jsonl"
+  output_dir: "src/training/lora_model"
+  checkpoints_dir: "src/training/checkpoints"
+
+data_generation:
+  target_count: 10000
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42
+  language: "en"            # Pure English for Qwen RAG Pipeline
+  strategies:
+    - name: "entity_queries"
+      description: "Overview, base stats, item details, rune mechanisms"
+      types: ["entity_champ_en", "stats_champ_en", "entity_item_en", "rune_en"]
+    - name: "ability_queries"
+      description: "Champion abilities (P, Q, W, E, R) stats, damage, cooldowns"
+      types: ["ability_active_en", "ability_passive_en"]
+    - name: "semantic_queries"
+      description: "Crowd control, skill effects (dash, shield), and champion roles"
+      types: ["semantic_cc", "semantic_effect", "semantic_role"]
+    - name: "gameplay_queries"
+      description: "Counters, item builds, runes, teamfighting, combos"
+      types: ["gameplay_en"]
+    - name: "lore_queries"
+      description: "Champion biographies, origin stories, regions, and character relationships"
+      types: ["lore_en", "lore_region_en", "lore_relation_en"]
+    - name: "comparison_queries"
+      description: "1v1 matchups, lane comparisons, and playstyle differences"
+      types: ["comparison_en"]
+
+hardware:
+  device: "cuda"            # Auto-fallback to cpu if CUDA is not available
+  target_gpu: "RTX 4050 (6GB VRAM)"
+  batch_size_gpu: 32
+  batch_size_cpu: 8
