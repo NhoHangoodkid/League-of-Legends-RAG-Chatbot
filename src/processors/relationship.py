@@ -237,13 +237,16 @@ class RelationshipGenerator:
             print("[RelationshipGenerator] ERROR: No champion data found in processed directory!")
             return {"champions": 0, "counters": 0, "synergies": 0, "builds": 0}
 
+        items = load_json(self.processed_dir / "items.json")
+        runes = load_json(self.processed_dir / "runes.json")
+
         # 3. Save individual champion files
         self.save_individual_champions(champions)
 
         # 4. Generate relationship datasets
         counter_count = self.generate_counters(champions)
         synergy_count = self.generate_synergies(champions)
-        build_count = self.generate_builds(champions)
+        build_count = self.generate_builds(champions, items, runes)
 
         print(f"[RelationshipGenerator] Successfully populated Knowledge Base at: {self.kb_dir}")
         print(f"  - Champions: {len(champions)} files")
@@ -411,9 +414,11 @@ class RelationshipGenerator:
             "synergies": duos,
         }
 
-    def generate_builds(self, champions):
+    def generate_builds(self, champions, items = None, runes = None):
         """Generate recommended builds, spells, and runes for all champions."""
         count = 0
+        item_names = self._build_name_set(items or {})
+        rune_names = self._build_name_set((runes or {}).get("byId", {}))
         for cid, champ in champions.items():
             name = champ.get("name", cid)
             roles = [r.lower() for r in champ.get("roles", [])]
@@ -428,12 +433,44 @@ class RelationshipGenerator:
             else:
                 b_data = self._infer_build(name, cid, roles, adaptive)
 
+            b_data = self._filter_build_references(b_data, item_names, rune_names)
+
             out_file = self.builds_dir / f"{cid.lower()}_build.json"
             save_json(b_data, out_file)
             count += 1
 
         print(f"[RelationshipGenerator] Generated {count} build files")
         return count
+
+    @staticmethod
+    def _build_name_set(entities):
+        """Return normalized display names from a processed entity dictionary."""
+        return {
+            data.get("name", "").lower()
+            for data in entities.values()
+            if isinstance(data, dict) and data.get("name")
+        }
+
+    @staticmethod
+    def _filter_build_references(build_data, item_names, rune_names):
+        """Keep only items and runes that exist in the current processed dataset."""
+        if item_names:
+            for key in ["coreItems", "fullBuild", "startingItems"]:
+                build_data[key] = [
+                    name for name in build_data.get(key, [])
+                    if name.lower() in item_names
+                ]
+
+        if rune_names:
+            for key in ["primaryRunes", "secondaryRunes"]:
+                build_data[key] = [
+                    name for name in build_data.get(key, [])
+                    if name.lower() in rune_names
+                ]
+            if build_data.get("keystone", "").lower() not in rune_names:
+                build_data["keystone"] = ""
+
+        return build_data
 
     @staticmethod
     def _infer_build(name, cid, roles, adaptive):
