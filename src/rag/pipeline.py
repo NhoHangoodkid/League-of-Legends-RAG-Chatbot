@@ -1,7 +1,7 @@
 """
 RAG Pipeline Orchestrator for LoL Knowledge Bot.
 
-End-to-end pipeline: Query → Intent → Hybrid Retrieval → Re-ranking → Context.
+End-to-end pipeline: Query -> Intent -> Hybrid Retrieval -> Re-ranking -> Context.
 
 This is the main entry point for the RAG system, combining:
 - Graph Retriever (Neo4j Knowledge Graph)
@@ -14,7 +14,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 # Ensure src/ is on path
 SRC_DIR = Path(__file__).resolve().parent.parent
@@ -29,9 +28,6 @@ from rag.retriever.reranker import CrossEncoderReranker
 from rag.vector.embeddings import EmbeddingModel, get_embedding_model
 from rag.vector.store import VectorStore
 
-
-# Default paths
-SRC_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_INDEX_DIR = SRC_DIR / "data" / "vector_index"
 
 
@@ -40,33 +36,16 @@ class RAGPipeline:
     End-to-end RAG pipeline orchestrator.
 
     Architecture:
-        Query → [Graph Retriever] ─┐
-                                    ├→ [Hybrid RRF Fusion] → [Cross-Encoder Reranker] → Context
-        Query → [Vector Retriever] ─┘
-
-    Usage:
-        pipeline = RAGPipeline()
-        context = pipeline.retrieve(query, entities, intent)
-        # context is a list of ranked passage dicts
+        Query -> [Graph Retriever] -+
+                                    +-> [Hybrid RRF Fusion] -> [Cross-Encoder Reranker] -> Context
+        Query -> [Vector Retriever] -+
     """
 
-    def __init__(self, graph_store = None, embedding_model = None, vector_store = None, index_dir = str(DEFAULT_INDEX_DIR), enable_graph = True, enable_vector = True, enable_reranker = True, rrf_k = 60):
-        """
-        Args:
-            graph_store: Neo4j store instance.
-            embedding_model: Embedding model instance.
-            vector_store: FAISS store instance.
-            index_dir: Directory containing FAISS index.
-            enable_graph: Whether to use graph retrieval.
-            enable_vector: Whether to use vector retrieval.
-            enable_reranker: Whether to use cross-encoder re-ranking.
-            rrf_k: RRF fusion constant.
-        """
+    def __init__(self, graph_store=None, embedding_model=None, vector_store=None, index_dir=str(DEFAULT_INDEX_DIR), enable_graph=True, enable_vector=True, enable_reranker=True, rrf_k=60):
         self.enable_graph = enable_graph
         self.enable_vector = enable_vector
         self.enable_reranker = enable_reranker
 
-        # Initialize components
         graph_retriever = None
         vector_retriever = None
 
@@ -89,7 +68,7 @@ class RAGPipeline:
                 if vector_store:
                     vstore = vector_store
                 else:
-                    vstore = VectorStore(dimension=emb_model.get_dimension(), use_gpu = True)
+                    vstore = VectorStore(dimension=emb_model.get_dimension(), use_gpu=True)
                     idx_path = Path(index_dir)
                     if (idx_path / "faiss.index").exists():
                         vstore.load(index_dir)
@@ -105,14 +84,12 @@ class RAGPipeline:
                 print(f"[RAGPipeline] Vector retriever: DISABLED ({e})")
                 self.enable_vector = False
 
-        # Hybrid retriever
         self.hybrid = HybridRetriever(
             graph_retriever=graph_retriever,
             vector_retriever=vector_retriever,
             rrf_k=rrf_k,
         )
 
-        # Re-ranker (lazy loaded)
         self.reranker = None
         if enable_reranker:
             try:
@@ -121,44 +98,20 @@ class RAGPipeline:
             except Exception as e:
                 print(f"[RAGPipeline] Re-ranker: DISABLED ({e})")
 
-    def retrieve(self, query, entities, intent, graph_top_k = 10, vector_top_k = 10, rerank_top_k = 5):
-        """
-        Full RAG retrieval pipeline.
-
-        Steps:
-        1. Hybrid retrieval (Graph + Vector with RRF fusion)
-        2. Cross-encoder re-ranking (if enabled)
-        3. Return ranked context passages
-
-        Args:
-            query: User query text.
-            entities: Extracted entities from intent classifier.
-            intent: Classified intent string.
-            graph_top_k: Max graph results before fusion.
-            vector_top_k: Max vector results before fusion.
-            rerank_top_k: Max results after re-ranking.
-
-        Returns:
-            List of context dicts sorted by relevance, each containing:
-            - text: The passage text
-            - source: Origin (graph/vector)
-            - score: Retrieval score
-            - metadata: Additional info
-        """
-        # Step 1: Hybrid retrieval
+    def retrieve(self, query, entities=None, intent=None, graph_top_k=10, vector_top_k=10, rerank_top_k=5):
+        """Full RAG retrieval pipeline: Hybrid retrieval + Re-ranking."""
         candidates = self.hybrid.retrieve(
             query=query,
             entities=entities,
             intent=intent,
             graph_top_k=graph_top_k,
             vector_top_k=vector_top_k,
-            final_top_k=rerank_top_k * 3,  # Get more candidates for re-ranking
+            final_top_k=rerank_top_k * 3,
         )
 
         if not candidates:
             return []
 
-        # Step 2: Re-ranking
         if self.reranker and self.enable_reranker and len(candidates) > 1:
             try:
                 candidates = self.reranker.rerank(
@@ -175,12 +128,7 @@ class RAGPipeline:
         return candidates
 
     def format_context_for_llm(self, contexts):
-        """
-        Format retrieved contexts into a single string for LLM consumption.
-
-        Produces a numbered list of relevant passages that the LLM
-        can reference when generating its response.
-        """
+        """Format retrieved contexts into a single string for LLM consumption."""
         if not contexts:
             return "Không tìm thấy thông tin liên quan."
 
@@ -201,16 +149,12 @@ class RAGPipeline:
         }
 
 
-#-----------------------------------------------------------------------------
-# Singleton
-#-----------------------------------------------------------------------------
-
-_pipeline_instance: Optional[RAGPipeline] = None
+pipeline_instance = None
 
 
 def get_rag_pipeline(**kwargs):
     """Get or create singleton RAGPipeline instance."""
-    global _pipeline_instance
-    if _pipeline_instance is None:
-        _pipeline_instance = RAGPipeline(**kwargs)
-    return _pipeline_instance
+    global pipeline_instance
+    if pipeline_instance is None:
+        pipeline_instance = RAGPipeline(**kwargs)
+    return pipeline_instance
