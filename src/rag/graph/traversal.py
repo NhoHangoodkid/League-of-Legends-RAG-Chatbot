@@ -6,30 +6,19 @@ from the Knowledge Graph based on the user's query intent and extracted entities
 """
 
 import json
-from typing import Any, Dict, List, Optional
 
 from rag.graph.schema import EdgeType, NodeType
 from rag.graph.store import Neo4jStore, get_graph_store
 
 
 class GraphTraversal:
-    """
-    Intent-driven graph traversal for context retrieval.
+    """Intent-driven graph traversal for context retrieval."""
 
-    Given a classified intent and entities, traverse the Knowledge Graph
-    to collect structured context for the LLM response generator.
-    """
-
-    def __init__(self, store = None):
+    def __init__(self, store=None):
         self.store = store or get_graph_store()
 
-    def retrieve_context(self, entities, intent, max_results = 10):
-        """
-        Main entry: dispatch to intent-specific traversal strategy.
-
-        Returns:
-            List of context dicts, each with 'text', 'source', 'score', 'metadata'.
-        """
+    def retrieve_context(self, entities, intent, max_results=10):
+        """Main entry: dispatch to intent-specific traversal strategy."""
         champ_name = entities.get("champion_name")
         item_name = entities.get("item_name")
         rune_name = entities.get("rune_name")
@@ -67,15 +56,10 @@ class GraphTraversal:
                 print(f"[GraphTraversal] Error in {intent}: {e}")
                 return []
 
-        # Fallback: if champion is known, get overview
         if champ_name:
             return self.traverse_champion_overview(champ_name)[:max_results]
 
         return []
-
-    #--------------------------------------------------------------------------
-    # Traversal Strategies
-    #--------------------------------------------------------------------------
 
     def traverse_champion_overview(self, name):
         """Get champion overview + 1-hop neighbors (roles, CC, effects, playstyles)."""
@@ -120,12 +104,11 @@ class GraphTraversal:
         return [{"text": text, "source": "graph:champion_overview", "score": 1.0,
                  "metadata": {"champion_id": c.get("champion_id"), "stats_json": c.get("stats_json", "{}")}}]
 
-    def traverse_counters(self, name, direction = None):
+    def traverse_counters(self, name, direction=None):
         """Traverse COUNTERS edges to find matchup data."""
         if not name:
             return []
 
-        # Who counters this champion (weak against)
         cypher_weak = """
         MATCH (counter:Champion)-[r:COUNTERS]->(c:Champion)
         WHERE c.champion_id = $name OR c.name =~ ('(?i).*' + $name + '.*')
@@ -135,7 +118,6 @@ class GraphTraversal:
         LIMIT 10
         """
 
-        # Who this champion counters (strong against)
         cypher_strong = """
         MATCH (c:Champion)-[r:COUNTERS]->(weak:Champion)
         WHERE c.champion_id = $name OR c.name =~ ('(?i).*' + $name + '.*')
@@ -280,7 +262,6 @@ class GraphTraversal:
 
         node = self.store.get_node(name, NodeType.CHAMPION)
         if not node:
-            # Try fuzzy
             cypher = """
             MATCH (c:Champion)
             WHERE c.name =~ ('(?i).*' + $name + '.*')
@@ -377,7 +358,6 @@ class GraphTraversal:
             return []
 
         label = tag_type.value
-        # Map tag type to edge type
         edge_map = {
             NodeType.CC_TYPE: "HAS_CC",
             NodeType.EFFECT: "HAS_EFFECT",
@@ -446,7 +426,6 @@ class GraphTraversal:
         LIMIT 20
         """
 
-        # Simpler fallback approach using MATCH patterns
         match_clauses = ", ".join(conditions)
         cypher_simple = f"""
         MATCH (c:Champion), {match_clauses}

@@ -15,7 +15,6 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 # Ensure src/ is on path
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
@@ -51,8 +50,8 @@ class GraphBuilder:
         self.fallback_kb = self.project_root.parent / "lol_chatbot" / "data" / "game_data"
 
         # Accumulators
-        self.nodes: List[GraphNode] = []
-        self.edges: List[GraphEdge] = []
+        self.nodes = []
+        self.edges = []
 
     def build(self, clear = False):
         """
@@ -127,9 +126,8 @@ class GraphBuilder:
             print(f"    {rel}: {count}")
         print("-" * 60)
 
-    #--------------------------------------------------------------------------
     # Node Builders
-    #--------------------------------------------------------------------------
+
 
     def build_champion_nodes(self, champions):
         """Create Champion nodes, Ability nodes, and tag nodes (Role, CC, Effect, etc.)."""
@@ -272,9 +270,8 @@ class GraphBuilder:
             count += 1
         print(f"  Runes: {count}")
 
-    #--------------------------------------------------------------------------
     # Edge Builders (Relationships)
-    #--------------------------------------------------------------------------
+
 
     def build_matchup_edges(self):
         """Build COUNTERS and SYNERGIZES_WITH edges from knowledge base."""
@@ -414,9 +411,8 @@ class GraphBuilder:
 
         print(f"  Item build-path edges: {edge_count}")
 
-    #--------------------------------------------------------------------------
     # Utilities
-    #--------------------------------------------------------------------------
+
 
     @staticmethod
     def normalize_name(name):
@@ -449,9 +445,7 @@ class GraphBuilder:
             return {}
 
 
-#-----------------------------------------------------------------------------
-# CLI Entry Point
-#-----------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Build LoL Knowledge Graph in Neo4j")

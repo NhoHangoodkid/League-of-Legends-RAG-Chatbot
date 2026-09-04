@@ -3,24 +3,16 @@ Neo4j Graph Store for LoL Knowledge Bot.
 
 Manages the Neo4j connection, schema initialization, bulk loading,
 and provides a high-level query API for graph operations.
-
-Requires Neo4j Community Edition running locally (default bolt://localhost:7687).
 """
 
 import json
 import os
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
 
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
 from rag.graph.schema import EdgeType, NodeType, GraphNode, GraphEdge
-
-
-#-----------------------------------------------------------------------------
-# Default Neo4j connection settings
-#-----------------------------------------------------------------------------
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
@@ -29,42 +21,30 @@ NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
 
 class Neo4jStore:
-    """
-    Neo4j-backed Knowledge Graph Store.
+    """Neo4j-backed Knowledge Graph Store."""
 
-    Provides:
-    - Connection lifecycle management
-    - Schema & constraint initialization
-    - Bulk node/edge insertion
-    - High-level Cypher query API (get_node, get_neighbors, subgraph, paths)
-    """
-
-    def __init__(self, uri = NEO4J_URI, user = NEO4J_USER, password = NEO4J_PASSWORD, database = NEO4J_DATABASE):
+    def __init__(self, uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD, database=NEO4J_DATABASE):
         self.uri = uri
         self.user = user
         self.password = password
         self.database = database
-        self._driver = None
-
-    #--------------------------------------------------------------------------
-    # Connection Management
-    #--------------------------------------------------------------------------
+        self.driver = None
 
     def connect(self):
         """Establish connection to Neo4j."""
-        if self._driver is not None:
+        if self.driver is not None:
             return
 
         try:
-            self._driver = GraphDatabase.driver(
+            self.driver = GraphDatabase.driver(
                 self.uri, auth=(self.user, self.password)
             )
-            self._driver.verify_connectivity()
+            self.driver.verify_connectivity()
             print(f"[Neo4jStore] Connected to {self.uri}")
         except ServiceUnavailable:
             raise ConnectionError(
                 f"[Neo4jStore] Cannot connect to Neo4j at {self.uri}. "
-                "Make sure Neo4j is running (Neo4j Desktop or Docker)."
+                "Make sure Neo4j is running."
             )
         except AuthError:
             raise ConnectionError(
@@ -74,34 +54,30 @@ class Neo4jStore:
 
     def close(self):
         """Close the Neo4j connection."""
-        if self._driver:
-            self._driver.close()
-            self._driver = None
+        if self.driver:
+            self.driver.close()
+            self.driver = None
             print("[Neo4jStore] Connection closed.")
 
     @contextmanager
     def session(self):
         """Context manager for Neo4j sessions."""
         self.connect()
-        session = self._driver.session(database=self.database)
+        sess = self.driver.session(database=self.database)
         try:
-            yield session
+            yield sess
         finally:
-            session.close()
+            sess.close()
 
     def is_connected(self):
         """Check if Neo4j is reachable."""
         try:
-            if self._driver is None:
+            if self.driver is None:
                 self.connect()
-            self._driver.verify_connectivity()
+            self.driver.verify_connectivity()
             return True
         except Exception:
             return False
-
-    #--------------------------------------------------------------------------
-    # Schema Initialization
-    #--------------------------------------------------------------------------
 
     def init_schema(self):
         """Create uniqueness constraints and indexes for all node types."""
@@ -118,26 +94,24 @@ class Neo4jStore:
             ("WinCondition", "name"),
         ]
 
-        with self.session() as session:
+        with self.session() as sess:
             for label, prop in constraints:
                 try:
-                    session.run(
+                    sess.run(
                         f"CREATE CONSTRAINT IF NOT EXISTS "
                         f"FOR (n:{label}) REQUIRE n.{prop} IS UNIQUE"
                     )
                 except Exception as e:
-                    # Fallback for older Neo4j versions
                     try:
-                        session.run(
+                        sess.run(
                             f"CREATE CONSTRAINT ON (n:{label}) "
                             f"ASSERT n.{prop} IS UNIQUE"
                         )
                     except Exception:
                         print(f"[Neo4jStore] Warning: Could not create constraint for {label}.{prop}: {e}")
 
-            # Full-text search index on Champion name + lore for fuzzy search
             try:
-                session.run(
+                sess.run(
                     "CREATE FULLTEXT INDEX champion_search IF NOT EXISTS "
                     "FOR (n:Champion) ON EACH [n.name, n.short_lore, n.title]"
                 )
@@ -145,7 +119,7 @@ class Neo4jStore:
                 pass
 
             try:
-                session.run(
+                sess.run(
                     "CREATE FULLTEXT INDEX item_search IF NOT EXISTS "
                     "FOR (n:Item) ON EACH [n.name, n.description]"
                 )
@@ -155,33 +129,25 @@ class Neo4jStore:
         print("[Neo4jStore] Schema initialized with constraints and indexes.")
 
     def clear_database(self):
-        """Remove all nodes and relationships. Use with caution."""
-        with self.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
+        """Remove all nodes and relationships."""
+        with self.session() as sess:
+            sess.run("MATCH (n) DETACH DELETE n")
         print("[Neo4jStore] Database cleared.")
 
-    #--------------------------------------------------------------------------
-    # Bulk Write Operations
-    #--------------------------------------------------------------------------
-
-    def bulk_create_nodes(self, nodes, batch_size = 500):
-        """
-        Bulk insert nodes using UNWIND for performance.
-        Groups nodes by type and inserts each group in batches.
-        """
-        # Group by node type
-        grouped: Dict[NodeType, List[Dict]] = {}
+    def bulk_create_nodes(self, nodes, batch_size=500):
+        """Bulk insert nodes using UNWIND for performance."""
+        grouped = {}
         for node in nodes:
             grouped.setdefault(node.node_type, []).append(
                 {"id": node.node_id, **node.properties}
             )
 
-        with self.session() as session:
+        with self.session() as sess:
             for node_type, items in grouped.items():
                 label = node_type.value
                 for i in range(0, len(items), batch_size):
                     batch = items[i : i + batch_size]
-                    session.run(
+                    sess.run(
                         f"UNWIND $batch AS props "
                         f"MERGE (n:{label} {{{self.id_key(node_type)}: props.id}}) "
                         f"SET n += props",
@@ -189,13 +155,9 @@ class Neo4jStore:
                     )
                 print(f"  Created {len(items)} {label} nodes")
 
-    def bulk_create_edges(self, edges, batch_size = 500):
-        """
-        Bulk insert edges using UNWIND.
-        Groups edges by type for efficient batch creation.
-        """
-        # Group by edge type
-        grouped: Dict[EdgeType, List[Dict]] = {}
+    def bulk_create_edges(self, edges, batch_size=500):
+        """Bulk insert edges using UNWIND."""
+        grouped = {}
         for edge in edges:
             grouped.setdefault(edge.edge_type, []).append(
                 {
@@ -205,7 +167,7 @@ class Neo4jStore:
                 }
             )
 
-        with self.session() as session:
+        with self.session() as sess:
             for edge_type, items in grouped.items():
                 rel_name = edge_type.value
                 src_label, tgt_label, src_key, tgt_key = self.edge_labels(edge_type)
@@ -219,26 +181,21 @@ class Neo4jStore:
                         f"MERGE (a)-[r:{rel_name}]->(b) "
                         f"SET r += props"
                     )
-                    session.run(cypher, batch=batch)
+                    sess.run(cypher, batch=batch)
                 print(f"  Created {len(items)} {rel_name} edges")
 
-    #--------------------------------------------------------------------------
-    # Query API
-    #--------------------------------------------------------------------------
-
-    def get_node(self, node_id, node_type = None):
+    def get_node(self, node_id, node_type=None):
         """Get a single node by ID, optionally filtering by type."""
-        with self.session() as session:
+        with self.session() as sess:
             if node_type:
                 label = node_type.value
                 id_key = self.id_key(node_type)
-                result = session.run(
+                result = sess.run(
                     f"MATCH (n:{label} {{{id_key}: $nid}}) RETURN n",
                     nid=node_id,
                 )
             else:
-                # Try all major types
-                result = session.run(
+                result = sess.run(
                     "MATCH (n) WHERE n.champion_id = $nid OR n.item_id = $nid "
                     "OR n.ability_id = $nid OR n.rune_id = $nid OR n.name = $nid "
                     "RETURN n LIMIT 1",
@@ -249,19 +206,8 @@ class Neo4jStore:
                 return dict(record["n"])
         return None
 
-    def get_neighbors(self, node_id, edge_type = None, direction = "out", limit = 50):
-        """
-        Get neighbors of a node, optionally filtered by edge type and direction.
-
-        Args:
-            node_id: The source node identifier.
-            edge_type: Filter by specific relationship type.
-            direction: 'out' (outgoing), 'in' (incoming), or 'both'.
-            limit: Maximum number of neighbors to return.
-
-        Returns:
-            List of dicts with 'node' properties and 'edge' properties.
-        """
+    def get_neighbors(self, node_id, edge_type=None, direction="out", limit=50):
+        """Get neighbors of a node, optionally filtered by edge type and direction."""
         rel_filter = f":{edge_type.value}" if edge_type else ""
 
         if direction == "out":
@@ -280,8 +226,8 @@ class Neo4jStore:
         )
 
         results = []
-        with self.session() as session:
-            records = session.run(cypher, nid=node_id, limit=limit)
+        with self.session() as sess:
+            records = sess.run(cypher, nid=node_id, limit=limit)
             for record in records:
                 results.append({
                     "node": dict(record["b"]),
@@ -290,23 +236,8 @@ class Neo4jStore:
                 })
         return results
 
-    def get_subgraph(self, node_id, max_depth = 2, max_nodes = 50):
-        """
-        Extract a k-hop subgraph around a node.
-
-        Returns:
-            Dict with 'center', 'nodes', and 'edges' keys.
-        """
-        cypher = (
-            f"MATCH (center) "
-            f"WHERE center.champion_id = $nid OR center.name = $nid "
-            f"OR center.item_id = $nid "
-            f"CALL apoc.path.subgraphAll(center, {{maxLevel: $depth}}) "
-            f"YIELD nodes, relationships "
-            f"RETURN nodes[..{max_nodes}] AS nodes, relationships AS edges"
-        )
-
-        # Fallback without APOC (more compatible)
+    def get_subgraph(self, node_id, max_depth=2, max_nodes=50):
+        """Extract a k-hop subgraph around a node."""
         fallback_cypher = (
             f"MATCH path = (center)-[*1..{max_depth}]-(neighbor) "
             f"WHERE center.champion_id = $nid OR center.name = $nid "
@@ -316,28 +247,8 @@ class Neo4jStore:
             f"RETURN center, neighbors, all_rels"
         )
 
-        with self.session() as session:
-            try:
-                result = session.run(cypher, nid=node_id, depth=max_depth)
-                record = result.single()
-                if record:
-                    return {
-                        "nodes": [dict(n) for n in record["nodes"]],
-                        "edges": [
-                            {
-                                "type": type(r).__name__,
-                                "source": dict(r.start_node),
-                                "target": dict(r.end_node),
-                                "props": dict(r),
-                            }
-                            for r in record["edges"]
-                        ],
-                    }
-            except Exception:
-                # APOC not available, use fallback
-                pass
-
-            result = session.run(fallback_cypher, nid=node_id)
+        with self.session() as sess:
+            result = sess.run(fallback_cypher, nid=node_id)
             record = result.single()
             if record:
                 center = dict(record["center"])
@@ -350,7 +261,7 @@ class Neo4jStore:
 
         return {"nodes": [], "edges": []}
 
-    def find_path(self, source_id, target_id, max_depth = 4):
+    def find_path(self, source_id, target_id, max_depth=4):
         """Find shortest path between two nodes."""
         cypher = (
             f"MATCH (a), (b), "
@@ -361,8 +272,8 @@ class Neo4jStore:
             f"[r IN relationships(path) | type(r)] AS path_rels"
         )
 
-        with self.session() as session:
-            result = session.run(cypher, src=source_id, tgt=target_id)
+        with self.session() as sess:
+            result = sess.run(cypher, src=source_id, tgt=target_id)
             record = result.single()
             if record:
                 return {
@@ -373,37 +284,30 @@ class Neo4jStore:
 
     def run_cypher(self, query, **params):
         """Execute an arbitrary Cypher query and return results as list of dicts."""
-        with self.session() as session:
-            result = session.run(query, **params)
+        with self.session() as sess:
+            result = sess.run(query, **params)
             return [dict(record) for record in result]
 
     def get_stats(self):
-        """Get graph statistics (node counts by label, edge counts by type)."""
+        """Get graph statistics."""
         stats = {}
-        with self.session() as session:
-            # Node counts
-            result = session.run(
+        with self.session() as sess:
+            result = sess.run(
                 "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS cnt "
                 "ORDER BY cnt DESC"
             )
             stats["nodes"] = {r["label"]: r["cnt"] for r in result}
 
-            # Edge counts
-            result = session.run(
+            result = sess.run(
                 "MATCH ()-[r]->() RETURN type(r) AS rel_type, count(r) AS cnt "
                 "ORDER BY cnt DESC"
             )
             stats["edges"] = {r["rel_type"]: r["cnt"] for r in result}
 
-            # Totals
             stats["total_nodes"] = sum(stats["nodes"].values())
             stats["total_edges"] = sum(stats["edges"].values())
 
         return stats
-
-    #--------------------------------------------------------------------------
-    # Internal Helpers
-    #--------------------------------------------------------------------------
 
     @staticmethod
     def id_key(node_type):
@@ -418,9 +322,7 @@ class Neo4jStore:
 
     @staticmethod
     def edge_labels(edge_type):
-        """
-        Return (source_label, target_label, source_key, target_key) for an edge type.
-        """
+        """Return (source_label, target_label, source_key, target_key) for an edge type."""
         mapping = {
             EdgeType.HAS_ABILITY: ("Champion", "Ability", "champion_id", "ability_id"),
             EdgeType.HAS_ROLE: ("Champion", "Role", "champion_id", "name"),
@@ -444,16 +346,12 @@ class Neo4jStore:
         )
 
 
-#-----------------------------------------------------------------------------
-# Singleton
-#-----------------------------------------------------------------------------
-
-_store_instance: Optional[Neo4jStore] = None
+store_instance = None
 
 
 def get_graph_store():
     """Get or create singleton Neo4jStore instance."""
-    global _store_instance
-    if _store_instance is None:
-        _store_instance = Neo4jStore()
-    return _store_instance
+    global store_instance
+    if store_instance is None:
+        store_instance = Neo4jStore()
+    return store_instance
