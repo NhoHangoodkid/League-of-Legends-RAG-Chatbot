@@ -11,10 +11,7 @@ GPU-accelerated vector similarity search using FAISS with:
 import json
 import os
 import pickle
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
 import numpy as np
 
 try:
@@ -24,14 +21,17 @@ except ImportError:
     print("[VectorStore] WARNING: faiss not installed. Run: pip install faiss-cpu (or faiss-gpu)")
 
 
-@dataclass
 class SearchResult:
     """A single search result from vector retrieval."""
 
-    chunk_id: str
-    text: str
-    score: float
-    metadata: Dict[str, Any]
+    def __init__(self, chunk_id="", text="", score=0.0, metadata=None):
+        self.chunk_id = chunk_id
+        self.text = text
+        self.score = score
+        self.metadata = metadata or {}
+
+    def __repr__(self):
+        return f"SearchResult(chunk_id='{self.chunk_id}', score={self.score:.4f})"
 
 
 class VectorStore:
@@ -45,7 +45,7 @@ class VectorStore:
     - Save/Load to disk (index + metadata)
     """
 
-    def __init__(self, dimension = 384, use_gpu = True):
+    def __init__(self, dimension=384, use_gpu=True):
         """
         Args:
             dimension: Embedding vector dimension.
@@ -74,7 +74,7 @@ class VectorStore:
             print(f"[VectorStore] Using CPU FAISS (dim={dimension})")
 
         # Metadata storage (parallel to index vectors)
-        self.metadata: List[Dict[str, Any]] = []
+        self.metadata = []
 
     def add(self, embeddings, metadata_list):
         """
@@ -97,7 +97,7 @@ class VectorStore:
         self.index.add(embeddings)
         self.metadata.extend(metadata_list)
 
-    def search(self, query_embedding, top_k = 10, filter_fn = None):
+    def search(self, query_embedding, top_k=10, filter_fn=None):
         """
         Search for nearest neighbors.
 
@@ -156,7 +156,7 @@ class VectorStore:
         - {directory}/metadata.pkl — Metadata list
         """
         path = Path(directory)
-        path.mkdir(parents = True, exist_ok = True)
+        path.mkdir(parents=True, exist_ok=True)
 
         # Save FAISS index (need to convert GPU index to CPU for saving)
         cpu_index = self.index
@@ -176,7 +176,7 @@ class VectorStore:
             "gpu": self.gpu_available,
         }
         with open(path / "index_stats.json", "w") as f:
-            json.dump(stats, f, indent = 2)
+            json.dump(stats, f, indent=2)
 
         print(f"[VectorStore] Saved {self.index.ntotal} vectors to {directory}")
 

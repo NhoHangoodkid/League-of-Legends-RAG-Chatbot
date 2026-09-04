@@ -13,7 +13,6 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 # Ensure src/ is on path
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
@@ -23,7 +22,6 @@ if str(SRC_DIR) not in sys.path:
 from rag.vector.chunker import DocumentChunk, DocumentChunker
 from rag.vector.embeddings import EmbeddingModel, get_embedding_model
 from rag.vector.store import VectorStore
-
 
 # Default paths
 PROJECT_ROOT = SRC_DIR.parent
@@ -45,12 +43,12 @@ class Indexer:
     5. Persist index + metadata to disk
     """
 
-    def __init__(self, embedding_model = None, index_dir = str(DEFAULT_INDEX_DIR)):
+    def __init__(self, embedding_model=None, index_dir=str(DEFAULT_INDEX_DIR)):
         self.embedding_model = embedding_model or get_embedding_model()
         self.index_dir = index_dir
         self.chunker = DocumentChunker()
 
-    def build_index(self, clear = False):
+    def build_index(self, clear=False):
         """
         Execute the full indexing pipeline.
 
@@ -98,8 +96,8 @@ class Indexer:
         texts = [chunk.text for chunk in chunks]
         embeddings = self.embedding_model.encode(
             texts,
-            batch_size = 64,
-            show_progress = True,
+            batch_size=64,
+            show_progress=True,
         )
         print(f"  Embedding shape: {embeddings.shape}")
 
@@ -107,7 +105,7 @@ class Indexer:
         print("\n[4/4] Building FAISS index...")
         store = VectorStore(
             dimension=self.embedding_model.get_dimension(),
-            use_gpu = True,
+            use_gpu=True,
         )
 
         # Prepare metadata
@@ -142,9 +140,7 @@ class Indexer:
 
         return store
 
-    #--------------------------------------------------------------------------
     # Data Loaders
-    #--------------------------------------------------------------------------
 
     def load_counter_data(self):
         """Load counter data from knowledge base or fallback."""
@@ -194,15 +190,11 @@ class Indexer:
         if not path.exists():
             return {}
         try:
-            with open(path, "r", encoding = "utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
 
-
-#-----------------------------------------------------------------------------
-# CLI Entry Point
-#-----------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Build FAISS vector index for LoL Knowledge Bot")
@@ -212,7 +204,7 @@ def main():
     args = parser.parse_args()
 
     indexer = Indexer(index_dir=args.index_dir)
-    indexer.build_index(clear = args.clear)
+    indexer.build_index(clear=args.clear)
 
 
 if __name__ == "__main__":

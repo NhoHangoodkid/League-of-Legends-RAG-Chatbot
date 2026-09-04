@@ -16,21 +16,22 @@ Chunking Strategies:
 """
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 
-@dataclass
 class DocumentChunk:
     """A single chunk of text with metadata for indexing."""
 
-    chunk_id: str                      # Unique ID (e.g. "champion:Aatrox:overview")
-    text: str                          # The actual text to embed
-    entity_type: str                   # "champion", "ability", "item", "rune", "matchup"
-    entity_name: str                   # The main entity name
-    chunk_type: str                    # "overview", "ability", "stats", "counter", "build", etc.
-    metadata: Dict[str, Any] = field(default_factory = dict)
+    def __init__(self, chunk_id, text, entity_type, entity_name, chunk_type, metadata=None):
+        self.chunk_id = chunk_id
+        self.text = text
+        self.entity_type = entity_type
+        self.entity_name = entity_name
+        self.chunk_type = chunk_type
+        self.metadata = metadata or {}
+
+    def __repr__(self):
+        return f"DocumentChunk(id='{self.chunk_id}', type='{self.chunk_type}')"
 
 
 class DocumentChunker:
@@ -44,7 +45,7 @@ class DocumentChunker:
     - Carry metadata for post-retrieval filtering
     """
 
-    def chunk_all(self, champions, items, runes, counters = None, synergies = None, builds = None):
+    def chunk_all(self, champions, items, runes, counters=None, synergies=None, builds=None):
         """
         Generate all document chunks from processed data.
 
@@ -84,9 +85,7 @@ class DocumentChunker:
         print(f"[Chunker] Generated {len(chunks)} chunks")
         return chunks
 
-    #--------------------------------------------------------------------------
     # Champion Chunking
-    #--------------------------------------------------------------------------
 
     def chunk_champion(self, champ_id, champ):
         """Generate chunks for a single champion."""
@@ -203,9 +202,7 @@ class DocumentChunker:
 
         return chunks
 
-    #--------------------------------------------------------------------------
     # Item Chunking
-    #--------------------------------------------------------------------------
 
     def chunk_item(self, item_id, item):
         """Generate chunks for a single item."""
@@ -246,9 +243,7 @@ class DocumentChunker:
             metadata={"item_id": str(item_id), "cost_total": cost_total},
         )]
 
-    #--------------------------------------------------------------------------
     # Rune Chunking
-    #--------------------------------------------------------------------------
 
     def chunk_rune(self, rune_id, rune):
         """Generate chunks for a single rune."""
@@ -268,9 +263,7 @@ class DocumentChunker:
             metadata={"rune_id": str(rune_id), "tree": tree},
         )]
 
-    #--------------------------------------------------------------------------
     # Matchup Chunking
-    #--------------------------------------------------------------------------
 
     def chunk_counters(self, champ_key, data):
         """Generate counter matchup chunks."""
@@ -279,15 +272,20 @@ class DocumentChunker:
         weak_against = data.get("weakAgainst", [])[:5]
         strong_against = data.get("strongAgainst", [])[:5]
 
+        if not weak_against and not strong_against:
+            return []
+
         lines = [f"{champ_name} counter matchups:"]
         if weak_against:
             lines.append("  Weak against (khắc chế bởi):")
             for m in weak_against:
-                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%)")
+                reason = f" — {m.get('reason')}" if m.get("reason") else ""
+                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%){reason}")
         if strong_against:
             lines.append("  Strong against (khắc chế tốt):")
             for m in strong_against:
-                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%)")
+                reason = f" — {m.get('reason')}" if m.get("reason") else ""
+                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%){reason}")
 
         return [DocumentChunk(
             chunk_id=f"matchup:{champ_key}:counters",
@@ -304,12 +302,13 @@ class DocumentChunker:
         if isinstance(synergies, dict):
             synergies = synergies.get("synergies", [])
 
-        champ_name = champ_key
+        champ_name = data.get("champion", champ_key) if isinstance(data, dict) else champ_key
         lines = [f"{champ_name} best duo partners:"]
         for duo in (synergies if isinstance(synergies, list) else [])[:5]:
             lines.append(
                 f"  - {duo.get('champion', '?')} "
                 f"(Duo win rate: {duo.get('duo_win_rate', duo.get('winRate', '?'))}%)"
+                f"{' — ' + duo.get('reason') if duo.get('reason') else ''}"
             )
 
         if len(lines) <= 1:

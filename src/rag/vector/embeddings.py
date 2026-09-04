@@ -10,12 +10,9 @@ Wraps sentence-transformers with support for:
 
 import os
 from pathlib import Path
-from typing import List, Optional, Union
-
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
-
 
 # BGE models require a query instruction prefix for asymmetric retrieval
 BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
@@ -38,15 +35,7 @@ class EmbeddingModel:
     - L2 normalization for cosine similarity
     """
 
-    def __init__(self, model_name = DEFAULT_MODEL, lora_path = None, device = None, normalize = True, use_lora = True):
-        """
-        Args:
-            model_name: HuggingFace model name or local path.
-            lora_path: Path to LoRA adapter directory (if fine-tuned).
-            device: 'cuda', 'cpu', or None (auto-detect).
-            normalize: If True, L2-normalize embeddings (for cosine sim with dot product).
-            use_lora: If False, skip loading LoRA adapter even if found.
-        """
+    def __init__(self, model_name=DEFAULT_MODEL, lora_path=None, device=None, normalize=True, use_lora=True):
         self.model_name = model_name
         self.normalize = normalize
         self.dimension = DEFAULT_DIMENSION
@@ -62,7 +51,7 @@ class EmbeddingModel:
 
         # Load model
         print(f"[EmbeddingModel] Loading {model_name} on {self.device}...")
-        self.model = SentenceTransformer(model_name, device = self.device)
+        self.model = SentenceTransformer(model_name, device=self.device)
         self.dimension = self.model.get_sentence_embedding_dimension()
         print(f"[EmbeddingModel] Loaded. Dimension: {self.dimension}, Device: {self.device}")
 
@@ -83,20 +72,12 @@ class EmbeddingModel:
             if resolved_lora_path and Path(resolved_lora_path).exists():
                 self.load_lora_adapter(resolved_lora_path)
 
-    def encode(self, texts, batch_size = 64, show_progress = False):
+    def encode(self, texts, batch_size=64, show_progress=False):
         """
         Encode texts (passages/documents) to dense vectors.
 
         For BGE models, this encodes WITHOUT the query instruction prefix,
         since these are passages, not queries.
-
-        Args:
-            texts: Single text or list of texts to encode.
-            batch_size: Batch size for encoding.
-            show_progress: Show progress bar.
-
-        Returns:
-            numpy array of shape (n, dimension).
         """
         if isinstance(texts, str):
             texts = [texts]
@@ -111,18 +92,12 @@ class EmbeddingModel:
 
         return embeddings
 
-    def encode_query(self, query, batch_size = 32):
+    def encode_query(self, query, batch_size=32):
         """
         Encode queries with instruction prefix (for asymmetric retrieval).
 
         BGE models use a query instruction prefix to distinguish
         queries from passages during retrieval.
-
-        Args:
-            query: Single query or list of queries.
-
-        Returns:
-            numpy array of shape (n, dimension).
         """
         if isinstance(query, str):
             queries = [query]
@@ -162,7 +137,7 @@ class EmbeddingModel:
 
             # Replace the model in SentenceTransformer
             self.model._first_module().auto_model = merged_model
-            print(f"[EmbeddingModel] LoRA adapter loaded and merged successfully.")
+            print("[EmbeddingModel] LoRA adapter loaded and merged successfully.")
 
         except ImportError:
             print("[EmbeddingModel] WARNING: peft not installed. Skipping LoRA adapter.")
@@ -184,16 +159,12 @@ class EmbeddingModel:
         )
 
 
-#-----------------------------------------------------------------------------
-# Singleton
-#-----------------------------------------------------------------------------
-
-_embedding_instance: Optional[EmbeddingModel] = None
+embedding_instance = None
 
 
-def get_embedding_model(model_name = DEFAULT_MODEL, lora_path = None):
+def get_embedding_model(model_name=DEFAULT_MODEL, lora_path=None):
     """Get or create singleton EmbeddingModel instance."""
-    global _embedding_instance
-    if _embedding_instance is None:
-        _embedding_instance = EmbeddingModel(model_name=model_name, lora_path=lora_path)
-    return _embedding_instance
+    global embedding_instance
+    if embedding_instance is None:
+        embedding_instance = EmbeddingModel(model_name=model_name, lora_path=lora_path)
+    return embedding_instance
