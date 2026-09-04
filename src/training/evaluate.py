@@ -69,6 +69,9 @@ class RetrievalEvaluator:
             c_emb = self.embedding_model.encode(corpus)
             latencies.append((time.time() - t0) * 1000)
 
+            if (i + 1) % 200 == 0 or (i + 1) == len(triplets):
+                print(f"  [{i + 1}/{len(triplets)}] evaluated...")
+
             # Similarity scores (inner product of normalized vectors = cosine sim)
             scores = np.dot(c_emb, q_emb.T).flatten()
             ranked_indices = np.argsort(-scores)
