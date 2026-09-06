@@ -27,11 +27,26 @@ if str(SRC_DIR) not in sys.path:
 
 
 # Default paths
+PROJECT_ROOT = SRC_DIR.parent
 PROCESSED_DIR = SRC_DIR / "processors" / "processed"
 TRAINING_DATA_DIR = SRC_DIR / "training"
 LORA_OUTPUT_DIR = SRC_DIR / "training" / "lora_model"
 
 DEFAULT_BASE_MODEL = "BAAI/bge-small-en-v1.5"
+
+
+def resolve_data_path(path_str):
+    """Safely resolve data file paths across current working dir and project root."""
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if p.is_absolute() and p.exists():
+        return p
+    for base in [Path.cwd(), PROJECT_ROOT, SRC_DIR, TRAINING_DATA_DIR]:
+        cand = base / path_str
+        if cand.exists():
+            return cand
+    return p
 
 
 class LoRAEmbeddingTrainer:
@@ -64,7 +79,7 @@ class LoRAEmbeddingTrainer:
             vram = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[LoRATrainer] GPU: {gpu_name} ({vram:.1f} GB VRAM)")
 
-    def train(self, training_data_path = str(TRAINING_DATA_DIR / "train.jsonl"), val_data_path = str(TRAINING_DATA_DIR / "val.jsonl"), output_dir = str(LORA_OUTPUT_DIR), epochs = 3, batch_size = 32, learning_rate = 2e-4, warmup_ratio = 0.1, eval_split = 0.1, fp16 = True):
+    def train(self, training_data_path = str(TRAINING_DATA_DIR / "train.jsonl"), val_data_path = str(TRAINING_DATA_DIR / "val.jsonl"), output_dir = str(LORA_OUTPUT_DIR), epochs = 3, batch_size = 32, learning_rate = 2e-4, warmup_ratio = 0.1, eval_split = 0.1, fp16 = True, evaluation_steps = 100):
         """
         Train LoRA adapter on domain-specific triplets.
 
@@ -78,6 +93,7 @@ class LoRAEmbeddingTrainer:
             warmup_ratio: Proportion of warmup steps.
             eval_split: Fraction of data for evaluation if val_data_path is not available.
             fp16: Use mixed precision training.
+            evaluation_steps: Evaluate on validation set every N training steps.
         """
         from sentence_transformers import (
             SentenceTransformer,
@@ -99,13 +115,14 @@ class LoRAEmbeddingTrainer:
 
         # 1. Load training data
         print("\n[1/4] Loading training data...")
-        train_triplets = self.load_triplets(training_data_path)
-        print(f"  Train: {len(train_triplets)} triplets (loaded from {Path(training_data_path).name})")
+        resolved_train = resolve_data_path(training_data_path)
+        train_triplets = self.load_triplets(resolved_train)
+        print(f"  Train: {len(train_triplets)} triplets (loaded from {resolved_train.name if resolved_train else training_data_path})")
 
-        val_file = Path(val_data_path) if val_data_path else None
-        if val_file and val_file.exists():
-            eval_triplets = self.load_triplets(str(val_file))
-            print(f"  Eval:  {len(eval_triplets)} triplets (loaded from {val_file.name} — zero-leakage)")
+        resolved_val = resolve_data_path(val_data_path) if val_data_path else None
+        if resolved_val and resolved_val.exists():
+            eval_triplets = self.load_triplets(resolved_val)
+            print(f"  Eval:  {len(eval_triplets)} triplets (loaded from {resolved_val.name} — zero-leakage)")
         else:
             split_idx = int(len(train_triplets) * (1 - eval_split))
             eval_triplets = train_triplets[split_idx:]
@@ -156,17 +173,29 @@ class LoRAEmbeddingTrainer:
             batch_size = batch_size,
         )
 
-        # Evaluator
-        eval_queries = [t["query"] for t in eval_triplets]
-        eval_positives = [t["positive"] for t in eval_triplets]
-        eval_negatives = [t["negative"] for t in eval_triplets]
+        # Evaluator: TripletEvaluator using zero-leakage validation triplets
+        evaluator = None
+        if eval_triplets:
+            eval_queries = [t["query"] for t in eval_triplets]
+            eval_positives = [t["positive"] for t in eval_triplets]
+            eval_negatives = [t["negative"] for t in eval_triplets]
+            evaluator = evaluation.TripletEvaluator(
+                eval_queries,
+                eval_positives,
+                eval_negatives,
+                name = "val_zero_leakage",
+                show_progress_bar = False,
+            )
+            print(f"  Validation evaluator active: {len(eval_triplets)} samples (eval every {evaluation_steps} steps)")
 
-        # Simple training loop using sentence-transformers fit()
+        # Training loop using sentence-transformers fit()
         total_steps = len(train_dataloader) * epochs
         warmup_steps = int(total_steps * warmup_ratio)
 
         model.fit(
             train_objectives = [(train_dataloader, train_loss)],
+            evaluator = evaluator,
+            evaluation_steps = evaluation_steps if evaluator else None,
             epochs = epochs,
             warmup_steps = warmup_steps,
             optimizer_params={"lr": learning_rate},
@@ -192,6 +221,7 @@ class LoRAEmbeddingTrainer:
             "epochs": epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
+            "evaluation_steps": evaluation_steps,
             "train_samples": len(train_triplets),
             "eval_samples": len(eval_triplets),
             "device": self.device,
@@ -206,22 +236,18 @@ class LoRAEmbeddingTrainer:
         print(f"  Adapter size: ~{self.get_dir_size(output_dir):.1f} MB")
         print("-" * 60)
 
+
     @staticmethod
     def load_triplets(path):
         """Load triplets from JSONL file."""
-        target_path = Path(path)
-        if not target_path.exists():
-            fallbacks = [
-                SRC_DIR / "training" / "train.jsonl",
-                SRC_DIR / "data" / "training" / "train.jsonl",
-            ]
-            for fb in fallbacks:
-                if fb.exists():
-                    target_path = fb
-                    break
+        target_path = resolve_data_path(path)
+        if not target_path or not target_path.exists():
+            fallback = TRAINING_DATA_DIR / "train.jsonl"
+            if fallback.exists():
+                target_path = fallback
 
-        if not target_path.exists():
-            raise FileNotFoundError(f"Training triplets file not found at {path} or fallback locations.")
+        if not target_path or not target_path.exists():
+            raise FileNotFoundError(f"Training triplets file not found at {path} or fallback location: {TRAINING_DATA_DIR / 'train.jsonl'}")
 
         triplets = []
         with open(target_path, "r", encoding = "utf-8") as f:
@@ -255,13 +281,14 @@ def main():
     parser.add_argument("--lr", type = float, default = None)
     parser.add_argument("--rank", type = int, default = None)
     parser.add_argument("--alpha", type = int, default = None)
+    parser.add_argument("--eval-steps", type = int, default = None)
 
     args = parser.parse_args()
 
     # Load YAML config if present
     cfg = {}
-    config_path = Path(args.config) if args.config else SRC_DIR / "training" / "train.yaml"
-    if config_path.exists():
+    config_path = resolve_data_path(args.config) if args.config else SRC_DIR / "training" / "train.yaml"
+    if config_path and config_path.exists():
         import yaml
         print(f"[LoRATrainer] Loading configuration from {config_path}")
         with open(config_path, "r", encoding = "utf-8") as f:
@@ -283,6 +310,7 @@ def main():
     alpha = args.alpha or lora_cfg.get("lora_alpha", 16)
     dropout = lora_cfg.get("lora_dropout", 0.1)
     target_modules = lora_cfg.get("target_modules", ["query", "key", "value"])
+    eval_steps = args.eval_steps or train_cfg.get("evaluation_steps", 100)
 
     trainer = LoRAEmbeddingTrainer(
         base_model = base_model,
@@ -301,6 +329,7 @@ def main():
         warmup_ratio = train_cfg.get("warmup_ratio", 0.1),
         eval_split = train_cfg.get("eval_split", 0.1),
         fp16 = train_cfg.get("fp16", True),
+        evaluation_steps = eval_steps,
     )
 
 

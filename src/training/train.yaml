@@ -32,7 +32,6 @@ paths:
   training_data: "src/training/train.jsonl"
   val_data: "src/training/val.jsonl"
   test_data: "src/training/test.jsonl"
-  fallback_training_data: "src/data/training/train.jsonl"
   output_dir: "src/training/lora_model"
   checkpoints_dir: "src/training/checkpoints"
 

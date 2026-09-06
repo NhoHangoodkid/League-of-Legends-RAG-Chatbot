@@ -11,6 +11,7 @@ training diversity, relationships, and sample counts.
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -21,6 +22,18 @@ from pathlib import Path
 SRC_DIR = Path(__file__).resolve().parent.parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(SRC_DIR.parent / ".env")
+except ImportError:
+    pass
+
+try:
+    from pymongo import MongoClient
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    PYMONGO_AVAILABLE = False
 
 from rag.vector.chunker import DocumentChunker
 
@@ -35,8 +48,116 @@ class TrainingTriplet:
     strategy: str       # Which generation strategy produced this
 
 
+def load_from_mongodb(uri = None, db_name = None):
+    """
+    Load champions, items, runes, counters, synergies, and builds directly from MongoDB.
+    Returns (champions, items, runes, counters, synergies, builds) or None if unavailable.
+    """
+    if not PYMONGO_AVAILABLE:
+        return None
+
+    mongo_uri = uri or os.getenv("MONGO_URI", "mongodb://localhost:27017")
+    database_name = db_name or os.getenv("MONGO_DB_NAME", "lol_rag_db")
+
+    try:
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS = 3000)
+        client.admin.command("ping")
+        db = client[database_name]
+
+        champions = {doc["_id"]: doc for doc in db.champions.find()}
+        if not champions:
+            return None
+
+        items = {doc["_id"]: doc for doc in db.items.find()}
+
+        runes_docs = list(db.runes.find())
+        by_id = {doc["_id"]: doc for doc in runes_docs if doc.get("type") != "tree"}
+        by_tree = {
+            doc.get("tree", doc["_id"].replace("tree_", "")): doc.get("runes", [])
+            for doc in runes_docs if doc.get("type") == "tree"
+        }
+        runes = {"byId": by_id, "byTree": by_tree}
+
+        counters = {doc["_id"]: doc for doc in db.counters.find()}
+        if not counters:
+            counters = {
+                cid: doc["counters"]
+                for cid, doc in champions.items()
+                if "counters" in doc and isinstance(doc["counters"], dict)
+            }
+
+        synergies = {doc["_id"]: doc for doc in db.synergies.find()}
+        if not synergies:
+            synergies = {
+                cid: {"champion": doc.get("name", cid), "synergies": doc["synergies"]}
+                for cid, doc in champions.items()
+                if "synergies" in doc and isinstance(doc["synergies"], list)
+            }
+
+        builds = {doc["_id"]: doc for doc in db.builds.find()}
+        if not builds:
+            builds = {
+                cid: doc["builds"]
+                for cid, doc in champions.items()
+                if "builds" in doc and isinstance(doc["builds"], dict)
+            }
+
+        for cid, cnt_doc in counters.items():
+            champ_doc = champions.get(cid, {})
+            tactical = champ_doc.get("tacticalInfo", {})
+            if "weaknesses" not in cnt_doc and tactical.get("weaknesses"):
+                cnt_doc["weaknesses"] = tactical["weaknesses"]
+            if "tactical_tips" not in cnt_doc and tactical.get("tactical_tips"):
+                cnt_doc["tactical_tips"] = tactical["tactical_tips"]
+            if "counter_items" not in cnt_doc and tactical.get("counter_items"):
+                cnt_doc["counter_items"] = tactical["counter_items"]
+
+        print(f"[DataGenerator] Successfully loaded knowledge data from MongoDB ('{database_name}'):")
+        print(f"  Champions: {len(champions)}, Items: {len(items)}, Runes: {len(by_id)}")
+        print(f"  Counters:  {len(counters)}, Synergies: {len(synergies)}, Builds: {len(builds)}")
+
+        return champions, items, runes, counters, synergies, builds
+    except Exception as e:
+        print(f"[DataGenerator] MongoDB load unavailable ({e})")
+        return None
+
+
 def load_knowledge_base_data():
-    """Load counters, synergies, and builds from knowledge base directory."""
+    """Load counters, synergies, and builds from MongoDB (or knowledge base directory as fallback)."""
+    # 1. Primary: load directly from MongoDB
+    try:
+        from pymongo import MongoClient
+        uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+        database_name = os.getenv("MONGO_DB_NAME", "lol_rag_db")
+        client = MongoClient(uri, serverSelectionTimeoutMS = 2000)
+        client.admin.command("ping")
+        db = client[database_name]
+
+        counters = {doc["_id"]: doc for doc in db.counters.find()}
+        synergies = {doc["_id"]: doc for doc in db.synergies.find()}
+        builds = {doc["_id"]: doc for doc in db.builds.find()}
+
+        if counters or synergies or builds:
+            try:
+                champs_lookup = {
+                    doc["_id"]: doc.get("tacticalInfo", {})
+                    for doc in db.champions.find({}, {"tacticalInfo": 1})
+                }
+                for cid, cnt_doc in counters.items():
+                    tactical = champs_lookup.get(cid, {})
+                    if "weaknesses" not in cnt_doc and tactical.get("weaknesses"):
+                        cnt_doc["weaknesses"] = tactical["weaknesses"]
+                    if "tactical_tips" not in cnt_doc and tactical.get("tactical_tips"):
+                        cnt_doc["tactical_tips"] = tactical["tactical_tips"]
+                    if "counter_items" not in cnt_doc and tactical.get("counter_items"):
+                        cnt_doc["counter_items"] = tactical["counter_items"]
+            except Exception:
+                pass
+            return counters, synergies, builds
+    except Exception:
+        pass
+
+    # 2. Fallback: local directory if present
     kb_dir = SRC_DIR / "data" / "knowledge_base"
     counters = {}
     synergies = {}
@@ -76,7 +197,7 @@ def load_knowledge_base_data():
 
 
 def partition_kb_by_champions(data_dict, champ_dict):
-    """Filter KB entries so relationship passages only reference split champions."""
+    """Filter KB entries so only champions in champ_dict have their KB chunks included."""
     allowed_names = set(c.get("name", "").lower() for c in champ_dict.values())
     allowed_ids = set(k.lower() for k in champ_dict.keys())
     result = {}
@@ -84,14 +205,7 @@ def partition_kb_by_champions(data_dict, champ_dict):
         c_name = v.get("champion", "").lower()
         c_id = v.get("champion_id", k).lower()
         if k.lower() in allowed_ids or c_id in allowed_ids or c_name in allowed_names:
-            filtered = dict(v)
-            for field in ["weakAgainst", "strongAgainst", "synergies"]:
-                if field in filtered:
-                    filtered[field] = [
-                        entry for entry in filtered[field]
-                        if entry.get("champion", "").lower() in allowed_names
-                    ]
-            result[k] = filtered
+            result[k] = v
     return result
 
 
@@ -110,8 +224,30 @@ class TrainingDataGenerator:
         self.chunks_by_entity = {}
 
     @staticmethod
-    def partition_dict(data, r_train = 0.8, r_val = 0.1, seed = 42):
+    def partition_dict(data, r_train = 0.8, r_val = 0.1, seed = 42, group_by_name = False):
         """Split dictionary entries deterministically to avoid entity leakage."""
+        if group_by_name:
+            name_to_keys = {}
+            for k, v in data.items():
+                name = v.get("name", str(k)).strip().lower() if isinstance(v, dict) else str(k).strip().lower()
+                name_to_keys.setdefault(name, []).append(k)
+
+            names = sorted(list(name_to_keys.keys()))
+            rng = random.Random(seed)
+            rng.shuffle(names)
+            n = len(names)
+            n_train = int(n * r_train)
+            n_val = int(n * r_val)
+
+            train_names = set(names[:n_train])
+            val_names = set(names[n_train:n_train + n_val])
+            test_names = set(names[n_train + n_val:])
+
+            train_d = {k: data[k] for name in train_names for k in name_to_keys[name]}
+            val_d = {k: data[k] for name in val_names for k in name_to_keys[name]}
+            test_d = {k: data[k] for name in test_names for k in name_to_keys[name]}
+            return train_d, val_d, test_d
+
         keys = sorted(list(data.keys()))
         rng = random.Random(seed)
         rng.shuffle(keys)
@@ -216,11 +352,37 @@ class TrainingDataGenerator:
             triplets.extend(build_triplets)
             print(f"  Generated: {len(build_triplets)}")
 
-        # 11. Strategy 10: Strategic Win Conditions & Power Curves (NEW)
+        # 11. Strategy 10: Strategic Win Conditions & Power Curves
         print("[DataGenerator] Strategy 10: Strategic metadata queries...")
         strategic_triplets = self.generate_strategic_queries(champions, split_mode=split_mode)
         triplets.extend(strategic_triplets)
         print(f"  Generated: {len(strategic_triplets)}")
+
+        # 12. Strategy 11: Champion Subrole & Position queries (NEW)
+        print("[DataGenerator] Strategy 11: Champion subrole and position queries...")
+        subrole_pos_triplets = self.generate_subrole_and_position_queries(champions, split_mode=split_mode)
+        triplets.extend(subrole_pos_triplets)
+        print(f"  Generated: {len(subrole_pos_triplets)}")
+
+        # 13. Strategy 12: Item Recipe & Build Path queries (NEW)
+        if items or "item_info" in self.chunks_by_type:
+            print("[DataGenerator] Strategy 12: Item recipe and build path queries...")
+            item_recipe_triplets = self.generate_item_recipe_queries(items, split_mode=split_mode)
+            triplets.extend(item_recipe_triplets)
+            print(f"  Generated: {len(item_recipe_triplets)}")
+
+        # 14. Strategy 13: Rune Tree & Keystone queries (NEW)
+        if runes or "rune_info" in self.chunks_by_type:
+            print("[DataGenerator] Strategy 13: Rune tree and keystone queries...")
+            rune_tree_triplets = self.generate_rune_queries(runes, split_mode=split_mode)
+            triplets.extend(rune_tree_triplets)
+            print(f"  Generated: {len(rune_tree_triplets)}")
+
+        # 15. Strategy 14: CC Mechanics & Combat Effect queries (NEW)
+        print("[DataGenerator] Strategy 14: CC mechanics and combat effect queries...")
+        cc_effect_triplets = self.generate_cc_and_effect_queries(champions, split_mode=split_mode)
+        triplets.extend(cc_effect_triplets)
+        print(f"  Generated: {len(cc_effect_triplets)}")
 
         # Deduplicate triplets by query
         seen_queries = set()
@@ -250,18 +412,20 @@ class TrainingDataGenerator:
         counters = None,
         synergies = None,
         builds = None,
-        total_count = 10000,
+        total_count = 12000,
         train_ratio = 0.8,
         val_ratio = 0.1,
         test_ratio = 0.1,
         seed = 42,
-        preserve_eval = True,
-        target_train_count = 16000,
+        preserve_eval = False,
+        target_train_count = 12000,
+        target_val_count = 1200,
+        target_test_count = 1200,
     ):
         """
         Generate train, val, and test splits with zero data leakage.
-        Preserves existing val and test splits exactly when preserve_eval=True.
-        Expands the train split with rich relationship and champion data.
+        Preserves existing val and test splits only when preserve_eval=True.
+        Expands all splits with rich relationships (Region, Lore Connections, Subroles, Positions).
         """
         # Load KB relationships if not passed
         if counters is None or synergies is None or builds is None:
@@ -272,7 +436,7 @@ class TrainingDataGenerator:
 
         print(f"[DataGenerator] Partitioning entities: train={train_ratio:.0%}, val={val_ratio:.0%}, test={test_ratio:.0%}")
         train_c, val_c, test_c = self.partition_dict(champions, r_train = train_ratio, r_val = val_ratio, seed = seed)
-        train_i, val_i, test_i = self.partition_dict(items, r_train = train_ratio, r_val = val_ratio, seed = seed + 1)
+        train_i, val_i, test_i = self.partition_dict(items, r_train = train_ratio, r_val = val_ratio, seed = seed + 1, group_by_name = True)
 
         runes_by_id = runes.get("byId", {})
         r_train, r_val, r_test = self.partition_dict(runes_by_id, r_train = train_ratio, r_val = val_ratio, seed = seed + 2)
@@ -294,8 +458,9 @@ class TrainingDataGenerator:
         val_builds = partition_kb_by_champions(builds, val_c)
         test_builds = partition_kb_by_champions(builds, test_c)
 
-        n_val = int(total_count * val_ratio)
-        n_test = total_count - int(total_count * train_ratio) - n_val
+        n_val = target_val_count if target_val_count and target_val_count > 0 else int(total_count * val_ratio)
+        n_test = target_test_count if target_test_count and target_test_count > 0 else int(total_count * test_ratio)
+        effective_train_count = target_train_count if target_train_count and target_train_count > 0 else total_count
 
         print(f"  Champions: {len(train_c)} train | {len(val_c)} val | {len(test_c)} test")
         print(f"  Items:     {len(train_i)} train | {len(val_i)} val | {len(test_i)} test")
@@ -342,15 +507,19 @@ class TrainingDataGenerator:
         raw_train_triplets = gen_train.generate(
             train_c, train_i, train_r,
             counters=train_counters, synergies=train_synergies, builds=train_builds,
-            target_count=target_train_count, seed=seed, split_mode="train",
+            target_count=effective_train_count + 8000, seed=seed, split_mode="train",
         )
 
         # Strictly enforce zero data leakage against val and test
-        train_triplets = [
+        clean_train = [
             t for t in raw_train_triplets
             if t.query.strip().lower() not in eval_queries
             and t.positive.strip() not in eval_passages
         ]
+        if effective_train_count and len(clean_train) > effective_train_count:
+            train_triplets = clean_train[:effective_train_count]
+        else:
+            train_triplets = clean_train
         print(f"[DataGenerator] Cleaned train triplets after zero-leakage check: {len(train_triplets)}")
 
         return {
@@ -384,9 +553,7 @@ class TrainingDataGenerator:
         }
         return metrics
 
-    # ------------------------------------------------------------------------
     # Indexing helpers
-    # ------------------------------------------------------------------------
 
     def index_chunks(self):
         """Index chunks by type and entity for fast lookup."""
@@ -408,9 +575,7 @@ class TrainingDataGenerator:
             return random.choice(other_entities).text
         return random.choice(self.chunks).text
 
-    # ------------------------------------------------------------------------
     # Strategy 1: Entity-based queries
-    # ------------------------------------------------------------------------
 
     def generate_entity_queries(self, champions, items, runes, split_mode = "all"):
         """Generate queries about specific entities (Champion, Item, Rune) in English."""
@@ -465,8 +630,29 @@ class TrainingDataGenerator:
             "What is {name}'s mobility rating and base movement speed?",
         ]
 
-        sample_k_overview = 14 if split_mode == "train" else 6
-        sample_k_stats = 10 if split_mode == "train" else 5
+        champ_overview_extra_en = [
+            "Complete breakdown of {name}: role, abilities, and playstyle",
+            "What kind of champion is {name} in League of Legends?",
+            "Combat characteristics and core playstyle of {name}",
+            "Summary of {name}'s strengths, primary role, and difficulty",
+            "Is {name} a ranged or melee champion, and what resource do they use?",
+            "What crowd control and special mechanics does {name} feature?",
+            "What champion archetype is {name} and what compositions suit them best?",
+        ]
+
+        champ_stats_extra_en = [
+            "What are {name}'s level 1 base stats: health, armor, MR, and AD?",
+            "What is {name}'s movement speed and basic attack range?",
+            "How do {name}'s health and armor scale per level?",
+            "Does {name} start with high or low base durability in lane?",
+            "What are {name}'s base health regen and mana pool values?",
+        ]
+
+        combined_overview = champ_overview_en + champ_overview_extra_en
+        combined_stats = champ_stats_en + champ_stats_extra_en
+
+        sample_k_overview = 9 if split_mode == "train" else 6
+        sample_k_stats = 6 if split_mode == "train" else 4
 
         # 1. Champion queries (Overview + Stats)
         for champ_id, champ in champions.items():
@@ -480,15 +666,15 @@ class TrainingDataGenerator:
 
             if overview_chunks:
                 pos_chunk = overview_chunks[0]
-                for tmpl in random.sample(champ_overview_en, min(sample_k_overview, len(champ_overview_en))):
+                for tmpl in random.sample(combined_overview, min(sample_k_overview, len(combined_overview))):
                     q = tmpl.format(name=name, role=primary_role)
-                    triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "entity_champ_en"))
+                    triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "entity_champ"))
 
             if stats_chunks:
                 pos_stat = stats_chunks[0]
-                for tmpl in random.sample(champ_stats_en, min(sample_k_stats, len(champ_stats_en))):
+                for tmpl in random.sample(combined_stats, min(sample_k_stats, len(combined_stats))):
                     q = tmpl.format(name=name)
-                    triplets.append(TrainingTriplet(q, pos_stat.text, self.get_negative(pos_stat), "stats_champ_en"))
+                    triplets.append(TrainingTriplet(q, pos_stat.text, self.get_negative(pos_stat), "stats_champ"))
 
         # 2. Item queries
         item_templates_en = [
@@ -511,9 +697,14 @@ class TrainingDataGenerator:
             "Which class (assassin, mage, adc, bruiser, tank) should prioritize {name}?",
             "What counter-play or defensive value does {name} provide?",
             "Detailed item description, stats, recipe, and passives for {name}",
+            "What are the stats, passives, and active effects of {name}?",
+            "How much does {name} cost in gold and what bonuses does it grant?",
+            "How does the unique passive on {name} function in combat?",
+            "Which champion classes and roles prioritize building {name}?",
+            "What tactical advantages does purchasing {name} provide in skirmishes?",
         ]
 
-        sample_k_item = 8 if split_mode == "train" else 5
+        sample_k_item = 5 if split_mode == "train" else 4
         for item_id, item in items.items():
             name = item.get("name", "")
             if not name:
@@ -525,7 +716,7 @@ class TrainingDataGenerator:
             pos_chunk = item_chunks[0]
             for tmpl in random.sample(item_templates_en, min(sample_k_item, len(item_templates_en))):
                 q = tmpl.format(name=name)
-                triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "entity_item_en"))
+                triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "entity_item"))
 
         # 3. Rune queries
         rune_templates_en = [
@@ -541,9 +732,13 @@ class TrainingDataGenerator:
             "Is {name} tailored for sustained DPS, burst damage, or defensive survivability?",
             "How does {name} scale with bonus attack damage or ability power?",
             "In what matchups is {name} the superior rune choice?",
+            "What does the {name} rune do and how is it triggered?",
+            "Which rune tree contains {name} and what stats does it provide?",
+            "How does keystone {name} function during teamfight combat?",
+            "Which champion archetypes should run {name} as their primary rune?",
         ]
 
-        sample_k_rune = 7 if split_mode == "train" else 4
+        sample_k_rune = 4 if split_mode == "train" else 3
         rune_chunks = [c for c in self.chunks if c.chunk_type == "rune_info"]
         for r_chunk in rune_chunks:
             r_name = r_chunk.entity_name
@@ -551,13 +746,11 @@ class TrainingDataGenerator:
                 continue
             for tmpl in random.sample(rune_templates_en, min(sample_k_rune, len(rune_templates_en))):
                 q = tmpl.format(name=r_name)
-                triplets.append(TrainingTriplet(q, r_chunk.text, self.get_negative(r_chunk), "rune_en"))
+                triplets.append(TrainingTriplet(q, r_chunk.text, self.get_negative(r_chunk), "rune"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
     # Strategy 2: Ability-specific queries
-    # ------------------------------------------------------------------------
 
     def generate_ability_queries(self, champions, split_mode = "all"):
         """Generate queries about specific champion abilities (P, Q, W, E, R) in English."""
@@ -598,8 +791,27 @@ class TrainingDataGenerator:
             "What tactical advantage does {name}'s passive give in lane trades?",
         ]
 
-        sample_k_active = 8 if split_mode == "train" else 5
-        sample_k_passive = 6 if split_mode == "train" else 4
+        ability_templates_extra_en = [
+            "What are the damage, cooldown, and mana cost of {name}'s {key}?",
+            "How does {name}'s {key} ability work in detail?",
+            "Does {name}'s {key} apply crowd control or utility effects?",
+            "How to use {name}'s {key} effectively during teamfights?",
+            "Is {name}'s {key} a skillshot, targeted ability, or self-buff?",
+            "At what ability ranks does {name}'s {key} power spike?",
+        ]
+
+        passive_templates_extra_en = [
+            "How does {name}'s innate passive work and what does it do?",
+            "What triggers {name}'s passive stacks and how does it refresh?",
+            "Detailed mechanics of {name}'s passive ability in combat",
+            "How does {name}'s passive synergize with their active QWER abilities?",
+        ]
+
+        combined_active = ability_templates_en + ability_templates_extra_en
+        combined_passive = passive_templates_en + passive_templates_extra_en
+
+        sample_k_active = 4 if split_mode == "train" else 3
+        sample_k_passive = 3 if split_mode == "train" else 2
 
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
@@ -615,9 +827,9 @@ class TrainingDataGenerator:
                     continue
 
                 pos_chunk = key_chunks[0]
-                for tmpl in random.sample(ability_templates_en, min(sample_k_active, len(ability_templates_en))):
+                for tmpl in random.sample(combined_active, min(sample_k_active, len(combined_active))):
                     q = tmpl.format(name=name, key=key)
-                    triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "ability_active_en"))
+                    triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "ability_active"))
 
             # Passive (P)
             passive_chunks = [
@@ -626,15 +838,13 @@ class TrainingDataGenerator:
             ]
             if passive_chunks:
                 pos_p = passive_chunks[0]
-                for tmpl in random.sample(passive_templates_en, min(sample_k_passive, len(passive_templates_en))):
+                for tmpl in random.sample(combined_passive, min(sample_k_passive, len(combined_passive))):
                     q = tmpl.format(name=name)
-                    triplets.append(TrainingTriplet(q, pos_p.text, self.get_negative(pos_p), "ability_passive_en"))
+                    triplets.append(TrainingTriplet(q, pos_p.text, self.get_negative(pos_p), "ability_passive"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
     # Strategy 3: Semantic filter queries
-    # ------------------------------------------------------------------------
 
     def generate_semantic_queries(self, champions, split_mode = "all"):
         """Generate queries about game concepts (CC types, effects, roles, playstyles) in English."""
@@ -774,16 +984,135 @@ class TrainingDataGenerator:
             ],
         }
 
+        subroles_map = {
+            "Artillery": [
+                "Artillery mages in League of Legends",
+                "Who are the long range artillery champions?",
+                "Champions classified as Artillery subclass",
+                "Long range siege and poke artillery champions",
+            ],
+            "Assassin": [
+                "Assassin champions in LoL",
+                "Who are the slayer burst assassins?",
+                "Champions with Assassin subrole",
+                "Mobile flankers and burst damage assassins",
+            ],
+            "Battlemage": [
+                "Battlemage champions in League",
+                "Who are the short-range sustained DPS mages?",
+                "Champions in the Battlemage subclass",
+                "Ramp-up sustained damage battlemages",
+            ],
+            "Burst": [
+                "Burst mage champions in League of Legends",
+                "Who are the high burst damage spellcasters?",
+                "Champions categorized under the Burst subrole",
+                "Single target and AoE burst mages",
+            ],
+            "Catcher": [
+                "Catcher support champions",
+                "Who are the pick-potential catcher champions?",
+                "Champions in the Catcher subclass",
+                "Lockdown pick and crowd control catchers",
+            ],
+            "Diver": [
+                "Diver fighter champions in League",
+                "Who are the diving bruisers in LoL?",
+                "Champions categorized as Divers",
+                "All-in backline access diving fighters",
+            ],
+            "Enchanter": [
+                "Enchanter support champions",
+                "Who are the defensive protective enchanters?",
+                "Champions with Enchanter subrole",
+                "Shielding, healing, and buffing utility enchanters",
+            ],
+            "Juggernaut": [
+                "Juggernaut champions in League of Legends",
+                "Who are the immobile durable juggernauts?",
+                "Champions with Juggernaut subrole",
+                "High damage raid-boss tanky juggernauts",
+            ],
+            "Marksman": [
+                "Marksman subclass champions",
+                "Who are the sustained auto-attack marksmen?",
+                "Champions classified as Marksman",
+                "Ranged DPS marksman champions",
+            ],
+            "Skirmisher": [
+                "Skirmisher champions in LoL",
+                "Who are the duelist skirmishers?",
+                "Champions in the Skirmisher subclass",
+                "Melee DPS duelist skirmishers",
+            ],
+            "Specialist": [
+                "Specialist champions in League of Legends",
+                "Who are the unique specialist champions?",
+                "Champions categorized as Specialists",
+                "Unique kit and niche playstyle specialists",
+            ],
+            "Vanguard": [
+                "Vanguard tank champions",
+                "Who are the primary frontline engage vanguards?",
+                "Champions with Vanguard subrole",
+                "Hard-engage teamfight frontline vanguards",
+            ],
+            "Warden": [
+                "Warden defensive tank champions",
+                "Who are the peeling warden tanks?",
+                "Champions categorized as Wardens",
+                "Defensive backline protector wardens",
+            ],
+        }
+
+        positions_map = {
+            "TOP": [
+                "Top lane champions in League of Legends",
+                "Who can be played in Top lane?",
+                "Champions for the Top position",
+                "List of top lane solo champions",
+                "Viable Top laners on Summoner's Rift",
+            ],
+            "JUNGLE": [
+                "Jungle champions in League of Legends",
+                "Who are the junglers in LoL?",
+                "Champions suited for the Jungle role",
+                "Viable jungle champions on Summoner's Rift",
+                "Who can jungle effectively?",
+            ],
+            "MID": [
+                "Mid lane champions in LoL",
+                "Who plays in the Mid lane?",
+                "Champions for the Middle lane position",
+                "Solo mid lane carry champions",
+                "Viable Mid laners on Summoner's Rift",
+            ],
+            "BOT": [
+                "Bot lane ADC carry champions",
+                "Who can be played in the Bot position?",
+                "Champions for the Bottom lane role",
+                "Ranged bot laners and duo carries",
+                "Bot lane carry champions",
+            ],
+            "SUPPORT": [
+                "Support champions in League of Legends",
+                "Who can play the Support role?",
+                "Champions for the Support position",
+                "Duo lane utility support champions",
+                "Viable Support champions on Summoner's Rift",
+            ],
+        }
+
         def pick_subset(options):
             if split_mode == "train":
-                return options
+                return options[:-2] if len(options) > 2 else options[:1]
             elif split_mode == "val":
                 return [options[-2]] if len(options) >= 2 else [options[-1]]
             elif split_mode == "test":
                 return [options[-1]]
             return options
 
-        sample_mult = 5 if split_mode == "train" else 2
+        sample_mult = 4 if split_mode == "train" else 2
 
         # 1. CC queries
         for cc_type, en_queries in cc_map.items():
@@ -794,7 +1123,7 @@ class TrainingDataGenerator:
             if not champs_with or not champs_without:
                 continue
 
-            n_samples = min(120 if split_mode == "train" else 45, len(champs_with) * sample_mult)
+            n_samples = min(45 if split_mode == "train" else 12, len(champs_with) * sample_mult)
             for _ in range(n_samples):
                 pos_id = random.choice(champs_with)
                 neg_id = random.choice(champs_without)
@@ -818,7 +1147,7 @@ class TrainingDataGenerator:
             if not champs_with or not champs_without:
                 continue
 
-            n_samples = min(120 if split_mode == "train" else 45, len(champs_with) * sample_mult)
+            n_samples = min(45 if split_mode == "train" else 12, len(champs_with) * sample_mult)
             for _ in range(n_samples):
                 pos_id = random.choice(champs_with)
                 neg_id = random.choice(champs_without)
@@ -842,7 +1171,7 @@ class TrainingDataGenerator:
             if not champs_with or not champs_without:
                 continue
 
-            n_samples = min(100 if split_mode == "train" else 35, len(champs_with) * sample_mult)
+            n_samples = min(45 if split_mode == "train" else 12, len(champs_with) * sample_mult)
             for _ in range(n_samples):
                 pos_id = random.choice(champs_with)
                 neg_id = random.choice(champs_without)
@@ -857,11 +1186,57 @@ class TrainingDataGenerator:
                     q = random.choice(pool)
                     triplets.append(TrainingTriplet(q, random.choice(pos_chunks).text, random.choice(neg_chunks).text, "semantic_role"))
 
+        # 4. Subrole queries (NEW)
+        for subrole, en_queries in subroles_map.items():
+            pool = pick_subset(en_queries)
+            champs_with = [cid for cid, c in champions.items() if subrole.lower() in [x.lower() for x in c.get("subroles", [])]]
+            champs_without = [cid for cid, c in champions.items() if subrole.lower() not in [x.lower() for x in c.get("subroles", [])]]
+
+            if not champs_with or not champs_without:
+                continue
+
+            n_samples = min(35 if split_mode == "train" else 10, len(champs_with) * sample_mult)
+            for _ in range(n_samples):
+                pos_id = random.choice(champs_with)
+                neg_id = random.choice(champs_without)
+
+                pos_name = champions[pos_id].get("name", pos_id)
+                neg_name = champions[neg_id].get("name", neg_id)
+
+                pos_chunks = [c for c in self.chunks_by_entity.get(pos_name.lower(), []) if c.chunk_type == "overview"]
+                neg_chunks = [c for c in self.chunks_by_entity.get(neg_name.lower(), []) if c.chunk_type == "overview"]
+
+                if pos_chunks and neg_chunks:
+                    q = random.choice(pool)
+                    triplets.append(TrainingTriplet(q, random.choice(pos_chunks).text, random.choice(neg_chunks).text, "semantic_subrole"))
+
+        # 5. Position / Lane queries (NEW)
+        for pos_lane, en_queries in positions_map.items():
+            pool = pick_subset(en_queries)
+            champs_with = [cid for cid, c in champions.items() if pos_lane.upper() in [x.upper() for x in c.get("positions", [])]]
+            champs_without = [cid for cid, c in champions.items() if pos_lane.upper() not in [x.upper() for x in c.get("positions", [])]]
+
+            if not champs_with or not champs_without:
+                continue
+
+            n_samples = min(60 if split_mode == "train" else 16, len(champs_with) * sample_mult)
+            for _ in range(n_samples):
+                pos_id = random.choice(champs_with)
+                neg_id = random.choice(champs_without)
+
+                pos_name = champions[pos_id].get("name", pos_id)
+                neg_name = champions[neg_id].get("name", neg_id)
+
+                pos_chunks = [c for c in self.chunks_by_entity.get(pos_name.lower(), []) if c.chunk_type == "overview"]
+                neg_chunks = [c for c in self.chunks_by_entity.get(neg_name.lower(), []) if c.chunk_type == "overview"]
+
+                if pos_chunks and neg_chunks:
+                    q = random.choice(pool)
+                    triplets.append(TrainingTriplet(q, random.choice(pos_chunks).text, random.choice(neg_chunks).text, "semantic_position"))
+
         return triplets
 
-    # ------------------------------------------------------------------------
     # Strategy 4: Gameplay and tactical queries
-    # ------------------------------------------------------------------------
 
     def generate_gameplay_queries(self, champions, items, split_mode = "all"):
         """Generate gameplay, tactical, build, and matchup queries in English."""
@@ -889,7 +1264,7 @@ class TrainingDataGenerator:
             "How does {name} peel for carries or dive backlines?",
         ]
 
-        sample_k = 10 if split_mode == "train" else 6
+        sample_k = 5 if split_mode == "train" else 4
 
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
@@ -908,9 +1283,7 @@ class TrainingDataGenerator:
 
         return triplets
 
-    # ------------------------------------------------------------------------
     # Strategy 5: Lore and biography queries
-    # ------------------------------------------------------------------------
 
     def generate_lore_queries(self, champions, split_mode = "all"):
         """Generate lore, backstory, origin, region, and relationship queries in English."""
@@ -932,6 +1305,12 @@ class TrainingDataGenerator:
             "What historical lore events are tied to {name}?",
             "What is the motivation and purpose of {name} in Runeterra?",
             "Summary of {name}'s character background and major lore conflicts",
+            "What is the complete backstory and biography of {name}?",
+            "Tell me the full legend and origin of {name} in Runeterra",
+            "Background history and early origins of {name} in the lore",
+            "Who was {name} before becoming known as {title}?",
+            "Major historical conflicts and lore events involving {name}",
+            "What is {name}'s overarching motivation and narrative purpose?",
         ]
 
         region_templates = [
@@ -942,6 +1321,11 @@ class TrainingDataGenerator:
             "Tell me about {name}'s origin in {region}",
             "What is the role of {name} in {region}?",
             "What faction does {name} fight for in {region}?",
+            "What region in the League of Legends universe does {name} originate from?",
+            "What is the home region and lore territory of {name}?",
+            "Is {name} affiliated with or native to {region}?",
+            "What is {name}'s role and influence in the region of {region}?",
+            "Which faction does {name} represent within {region}?",
         ]
 
         relation_templates = [
@@ -957,10 +1341,16 @@ class TrainingDataGenerator:
             "Are {name} and {related} enemies, rivals, or companions in lore?",
             "What shared history do {name} and {related} have in Runeterra?",
             "Is the bond between {name} and {related} one of friendship or conflict?",
+            "What lore relationship exists between {name} and {related}?",
+            "In the Runeterra universe, how are {name} and {related} connected?",
+            "Are {name} and {related} sworn allies or bitter enemies in the lore?",
+            "What major historical event involved both {name} and {related}?",
+            "Do {name} and {related} share the same faction, realm, or family lineage?",
+            "What grudge, rivalry, or bond ties {name} to {related} in the story?",
         ]
 
-        sample_lore = 8 if split_mode == "train" else 6
-        sample_region = 4 if split_mode == "train" else 3
+        sample_lore = 4 if split_mode == "train" else 4
+        sample_region = 3 if split_mode == "train" else 3
 
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
@@ -982,7 +1372,7 @@ class TrainingDataGenerator:
 
             # 2. Region / Faction queries
             region = champ.get("region")
-            if region and region != "Runeterra (Unaffiliated)":
+            if region:
                 for tmpl in random.sample(region_templates, min(sample_region, len(region_templates))):
                     pos_chunk = random.choice(lore_chunks)
                     neg_chunk_text = self.get_negative(pos_chunk)
@@ -990,20 +1380,82 @@ class TrainingDataGenerator:
 
             # 3. Related champions in lore
             related_list = champ.get("related_champions", [])
+            if related_list:
+                who_related_templates = [
+                    "Who is related to {name} in the lore?",
+                    "Which champions are connected to {name}'s story?",
+                    "What champions have backstory ties with {name}?",
+                    "Does {name} have narrative connections to other champions?",
+                    "Which champions are narrative ties or related to {name} in lore?",
+                    "Who are the canonical allies, enemies, or relatives of {name}?",
+                ]
+                for tmpl in random.sample(who_related_templates, min(2 if split_mode == "train" else 2, len(who_related_templates))):
+                    pos_chunk = random.choice(lore_chunks)
+                    neg_chunk_text = self.get_negative(pos_chunk)
+                    triplets.append(TrainingTriplet(tmpl.format(name=name), pos_chunk.text, neg_chunk_text, "lore_relation_en"))
+
             for rc in related_list:
                 rel_name = rc.get("name") if isinstance(rc, dict) else str(rc)
                 if not rel_name:
                     continue
-                for tmpl in random.sample(relation_templates, min(3, len(relation_templates))):
+                sample_rel = 2 if split_mode == "train" else 2
+                for tmpl in random.sample(relation_templates, min(sample_rel, len(relation_templates))):
                     pos_chunk = random.choice(lore_chunks)
                     neg_chunk_text = self.get_negative(pos_chunk)
                     triplets.append(TrainingTriplet(tmpl.format(name=name, related=rel_name), pos_chunk.text, neg_chunk_text, "lore_relation_en"))
 
+        # 4. Regional Champion Listing queries (NEW)
+        region_list_templates = [
+            "Which champions belong to {region}?",
+            "List of champions from {region} in League of Legends",
+            "Who are the champions originating from {region}?",
+            "Champions associated with {region} in lore",
+            "Tell me about the champions of {region}",
+            "Who belongs to the region of {region} in Runeterra?",
+            "List of all champions hailing from the region of {region}",
+            "Which champions originate from {region} in League of Legends lore?",
+            "What notable champions are native to {region} in Runeterra?",
+        ]
+
+        def pick_subset_reg(options):
+            if split_mode == "train":
+                return options[:-2] if len(options) > 2 else options[:1]
+            elif split_mode == "val":
+                return [options[-2]] if len(options) >= 2 else [options[-1]]
+            elif split_mode == "test":
+                return [options[-1]]
+            return options
+
+        reg_pool = pick_subset_reg(region_list_templates)
+
+        champs_by_region = {}
+        for cid, c in champions.items():
+            r = c.get("region")
+            if r:
+                champs_by_region.setdefault(r, []).append(cid)
+
+        for reg, cids in champs_by_region.items():
+            if len(cids) >= 1 and len(cids) < len(champions):
+                other_cids = [cid for cid in champions if cid not in cids]
+                if not other_cids:
+                    continue
+                n_samples = min(25 if split_mode == "train" else 10, len(cids) * 3)
+                for _ in range(n_samples):
+                    pos_id = random.choice(cids)
+                    neg_id = random.choice(other_cids)
+                    pos_name = champions[pos_id].get("name", pos_id)
+                    neg_name = champions[neg_id].get("name", neg_id)
+
+                    pos_chunks = [c for c in self.chunks_by_entity.get(pos_name.lower(), []) if c.chunk_type in ("overview", "lore")]
+                    neg_chunks = [c for c in self.chunks_by_entity.get(neg_name.lower(), []) if c.chunk_type in ("overview", "lore")]
+                    if pos_chunks and neg_chunks:
+                        tmpl = random.choice(reg_pool)
+                        q = tmpl.format(region=reg)
+                        triplets.append(TrainingTriplet(q, random.choice(pos_chunks).text, random.choice(neg_chunks).text, "lore_region_en"))
+
         return triplets
 
-    # ------------------------------------------------------------------------
     # Strategy 6: Comparison queries
-    # ------------------------------------------------------------------------
 
     def generate_comparison_queries(self, champions, split_mode = "all"):
         """Generate comparison queries between champions in English."""
@@ -1030,7 +1482,7 @@ class TrainingDataGenerator:
             "Which champion snowballs harder: {a} or {b}?",
         ]
 
-        target_comparisons = min(2200 if split_mode == "train" else 1200, len(champ_list) * 12)
+        target_comparisons = min(1000 if split_mode == "train" else 220, len(champ_list) * 14)
         for _ in range(target_comparisons):
             (id_a, champ_a), (id_b, champ_b) = random.sample(champ_list, 2)
             name_a = champ_a.get("name", id_a)
@@ -1056,97 +1508,237 @@ class TrainingDataGenerator:
 
         return triplets
 
-    # ------------------------------------------------------------------------
-    # Strategy 7: Counter Matchup queries (NEW)
-    # ------------------------------------------------------------------------
+    # Strategy 7: Counter Matchup queries (Enriched Bilingual & Entity Pairs)
 
-    def generate_counter_queries(self, champions, counters, split_mode = "all"):
-        """Generate matchup, counter-pick, and laning queries from counter data."""
+    def generate_counter_queries(self, champions, counters = None, split_mode = "all"):
+        """Generate matchup, counter-pick, laning, and specific champion pair queries (EN & VI)."""
         triplets = []
         counter_chunks = self.chunks_by_type.get("counter", [])
         if not counter_chunks:
             return triplets
 
-        counter_templates = [
+        c_chunks_by_name = {c.entity_name.lower(): c for c in counter_chunks}
+
+        counter_templates_en = [
             "Who counters {name} in lane?",
-            "What champions are strong against {name}?",
+            "What champions are strong counter picks into {name}?",
             "What is the best counter pick into {name}?",
-            "Who does {name} struggle against most?",
-            "Which champions have the highest win rate against {name}?",
-            "How do you counter {name} and exploit their weaknesses?",
-            "Who does {name} counter and win against easily?",
-            "Which matchups are favorable for {name}?",
+            "Who does {name} struggle against most in lane?",
+            "How do you counter {name} and exploit their tactical weaknesses?",
+            "Who does {name} counter and beat easily in lane?",
+            "Which champion matchups are favorable for {name}?",
             "What champions are weak against {name}?",
-            "Tips for playing against {name} in the laning phase",
-            "Why is {name} countered by specific champion picks?",
+            "Tactical tips for playing against {name} in the laning phase",
+            "Why is {name} countered by specific champion archetypes?",
             "Who should I ban or avoid picking into {name}?",
-            "Full counter matchup guide and win rates for {name}",
+            "Complete tactical counter matchup guide for {name}",
             "What makes {name} strong against certain enemy champions?",
+            "What mechanical advantages allow enemy champions to counter {name}?",
+            "How should you trade, space, and punish {name} in lane?",
         ]
 
-        sample_k = 10 if split_mode == "train" else 5
+        tactical_weakness_templates_en = [
+            "What are {name}'s core tactical weaknesses in combat?",
+            "What are the main combat vulnerabilities of {name}?",
+            "How do you punish and exploit {name}'s cooldowns and mobility?",
+            "What makes {name} vulnerable to ganks and burst damage?",
+            "What are the biggest weaknesses to exploit when facing {name}?",
+        ]
 
-        for c_chunk in counter_chunks:
-            name = c_chunk.entity_name
-            if not name:
+        tactical_tip_templates_en = [
+            "What tactical tips help you play against and beat {name}?",
+            "How should you space, trade, and position against {name} in lane?",
+            "How do you interrupt or neutralize {name}'s channeled abilities and engage?",
+            "What strategic advice helps shut down {name} in teamfights?",
+            "How to play around {name}'s abilities and engagement perimeter?",
+        ]
+
+        counter_item_templates_en = [
+            "What items should I build to counter {name}?",
+            "Which defensive counter items are most effective against {name}?",
+            "What items counter {name}'s damage profile?",
+            "How do you itemize defensively against {name}?",
+            "What counter items neutralize {name}'s healing, armor, or burst?",
+        ]
+
+        pair_weak_en = [
+            "Why does {enemy} counter {name} in lane?",
+            "How does {enemy} win the matchup against {name}?",
+            "What makes {enemy}'s kit so effective against {name}?",
+            "How to play as {name} against {enemy} in lane?",
+            "Why is {enemy} such a hard counter into {name}?",
+            "How does {enemy} win trades and beat {name} in lane?",
+            "What specific advantages and CC make {enemy} dominate {name}?",
+            "How does {enemy}'s crowd control and durability shut down {name}?",
+            "How should you play the lane matchup as {name} against {enemy}?",
+            "Why does {enemy}'s kit directly counter {name}'s combat pattern?",
+        ]
+
+        pair_strong_en = [
+            "Why is {name} a strong counter pick against {victim}?",
+            "How does {name} dominate {victim} in lane?",
+            "What gives {name} the winning edge against {victim}?",
+            "Can {name} beat {victim} in a 1v1 matchup?",
+            "Why does {name} counter and win lane against {victim}?",
+            "Is {name} an effective counter pick when the enemy drafts {victim}?",
+            "What kit advantages allow {name} to overwhelm {victim}?",
+            "In a 1v1 lane matchup between {name} and {victim}, who has the advantage?",
+            "How does {name}'s range or mobility counter {victim}?",
+        ]
+
+        # Merge counters source if dict passed or embedded
+        all_counters = {}
+        if counters:
+            all_counters.update(counters)
+        for cid, c in champions.items():
+            if cid not in all_counters and "counters" in c and isinstance(c["counters"], dict):
+                all_counters[cid] = c["counters"]
+
+        sample_k_gen = 4 if split_mode == "train" else 3
+        sample_k_pair = 2 if split_mode == "train" else 2
+
+        for champ_key, data in all_counters.items():
+            champ_name = data.get("champion", champ_key)
+            c_chunk = c_chunks_by_name.get(champ_name.lower())
+            if not c_chunk:
                 continue
 
-            for tmpl in random.sample(counter_templates, min(sample_k, len(counter_templates))):
-                q = tmpl.format(name=name)
-                triplets.append(TrainingTriplet(q, c_chunk.text, self.get_negative(c_chunk), "counter_matchup_en"))
+            neg_text = self.get_negative(c_chunk)
+
+            # 1. General counter templates
+            for tmpl in random.sample(counter_templates_en, min(sample_k_gen, len(counter_templates_en))):
+                q = tmpl.format(name=champ_name)
+                triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_matchup"))
+
+            # 2. Tactical weaknesses & tips templates
+            if data.get("weaknesses"):
+                tmpl = random.choice(tactical_weakness_templates_en)
+                q = tmpl.format(name=champ_name)
+                triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_weakness"))
+
+            if data.get("tactical_tips"):
+                tmpl = random.choice(tactical_tip_templates_en)
+                q = tmpl.format(name=champ_name)
+                triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_tips"))
+
+            # 3. Counter item templates
+            if data.get("counter_items"):
+                for tmpl in random.sample(counter_item_templates_en, min(2, len(counter_item_templates_en))):
+                    q = tmpl.format(name=champ_name)
+                    triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_items"))
+
+            # 4. Specific weakAgainst pair queries
+            weak_against = data.get("weakAgainst", [])
+            for m in weak_against[:4]:
+                enemy = m.get("champion")
+                if not enemy:
+                    continue
+                for tmpl in random.sample(pair_weak_en, min(sample_k_pair, len(pair_weak_en))):
+                    q = tmpl.format(name=champ_name, enemy=enemy)
+                    triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_pair_weak"))
+
+            # 5. Specific strongAgainst pair queries
+            strong_against = data.get("strongAgainst", [])
+            for m in strong_against[:3]:
+                victim = m.get("champion")
+                if not victim:
+                    continue
+                for tmpl in random.sample(pair_strong_en, min(sample_k_pair, len(pair_strong_en))):
+                    q = tmpl.format(name=champ_name, victim=victim)
+                    triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_pair_strong"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
-    # Strategy 8: Synergy & Duo queries (NEW)
-    # ------------------------------------------------------------------------
+    # Strategy 8: Synergy & Duo queries (Enriched Bilingual & Entity Pairs)
 
-    def generate_synergy_queries(self, champions, synergies, split_mode = "all"):
-        """Generate duo partner, bot lane pairing, and teamfight combo queries."""
+    def generate_synergy_queries(self, champions, synergies = None, split_mode = "all"):
+        """Generate duo partner, bot lane pairing, and teamfight combo queries (EN & VI)."""
         triplets = []
         synergy_chunks = self.chunks_by_type.get("synergy", [])
         if not synergy_chunks:
             return triplets
 
-        synergy_templates = [
+        s_chunks_by_name = {c.entity_name.lower(): c for c in synergy_chunks}
+
+        synergy_templates_en = [
             "Who is the best duo partner for {name}?",
             "What champions synergize best with {name}?",
-            "Who pairs well with {name} in bot lane?",
-            "What support should I pick to play with {name}?",
-            "Which champions have the highest duo win rate with {name}?",
+            "Who pairs well with {name} in lane?",
+            "What support or partner should I pick with {name}?",
             "What teamfight combos work best with {name}?",
-            "Who can enable {name} to carry games?",
+            "Who can peel, shield, or enable {name} to carry games?",
             "Best champion pairings and synergies for {name}",
             "Why do {name} and their duo partners win games together?",
-            "What crowd control champions set up {name}'s abilities?",
-            "Duo queue guide: best partners to climb with {name}",
+            "What crowd control champions set up {name}'s abilities and ultimate?",
+            "Duo queue guide: best champion pairings to climb with {name}",
+            "Which champions provide knockups or hard CC to enable {name}?",
+            "Who provides the best engage or buffs when playing {name}?",
+            "What ability synergies maximize {name}'s impact in teamfights?",
         ]
 
-        sample_k = 9 if split_mode == "train" else 4
+        pair_synergy_en = [
+            "Why do {name} and {partner} work so well together?",
+            "How do {name} and {partner} combo their abilities in lane?",
+            "What is the duo synergy between {name} and {partner}?",
+            "Why is {partner} one of the best duo partners for {name}?",
+            "How should {name} and {partner} play 2v2 skirmishes and teamfights?",
+            "Why are {name} and {partner} such an effective duo partnership?",
+            "How do {name} and {partner} chain crowd control and abilities together in combat?",
+            "What makes {partner} an ideal engage, peel, or damage partner for {name}?",
+            "How do {name} and {partner} coordinate their abilities for teamfight impact?",
+        ]
 
-        for s_chunk in synergy_chunks:
-            name = s_chunk.entity_name
-            if not name:
+        all_synergies = {}
+        if synergies:
+            all_synergies.update(synergies)
+        for cid, c in champions.items():
+            if cid not in all_synergies and "synergies" in c:
+                syn_val = c["synergies"]
+                all_synergies[cid] = {
+                    "champion": c.get("name", cid),
+                    "synergies": syn_val if isinstance(syn_val, list) else syn_val.get("synergies", [])
+                }
+
+        sample_k_gen = 4 if split_mode == "train" else 3
+        sample_k_pair = 2 if split_mode == "train" else 2
+
+        for champ_key, data in all_synergies.items():
+            champ_name = data.get("champion", champ_key) if isinstance(data, dict) else champ_key
+            s_chunk = s_chunks_by_name.get(champ_name.lower())
+            if not s_chunk:
                 continue
 
-            for tmpl in random.sample(synergy_templates, min(sample_k, len(synergy_templates))):
-                q = tmpl.format(name=name)
-                triplets.append(TrainingTriplet(q, s_chunk.text, self.get_negative(s_chunk), "synergy_duo_en"))
+            neg_text = self.get_negative(s_chunk)
+
+            # 1. General templates
+            for tmpl in random.sample(synergy_templates_en, min(sample_k_gen, len(synergy_templates_en))):
+                q = tmpl.format(name=champ_name)
+                triplets.append(TrainingTriplet(q, s_chunk.text, neg_text, "synergy_duo"))
+
+            # 2. Specific duo pair queries
+            duo_list = data.get("synergies", []) if isinstance(data, dict) else []
+            for duo in duo_list[:4]:
+                partner = duo.get("champion")
+                if not partner:
+                    continue
+                for tmpl in random.sample(pair_synergy_en, min(sample_k_pair, len(pair_synergy_en))):
+                    q = tmpl.format(name=champ_name, partner=partner)
+                    triplets.append(TrainingTriplet(q, s_chunk.text, neg_text, "synergy_pair"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
-    # Strategy 9: Build & Itemization queries (NEW)
-    # ------------------------------------------------------------------------
+    # Strategy 9: Build & Itemization queries (Enriched Bilingual & Specifics)
 
-    def generate_build_queries(self, champions, builds, split_mode = "all"):
-        """Generate item build, starting items, runes, and summoner spell queries."""
+    def generate_build_queries(self, champions, builds = None, split_mode = "all"):
+        """Generate item build, starting items, runes, and summoner spell queries (EN & VI)."""
         triplets = []
         build_chunks = self.chunks_by_type.get("build", [])
         if not build_chunks:
             return triplets
 
-        build_templates = [
+        b_chunks_by_name = {c.entity_name.lower(): c for c in build_chunks}
+
+        build_templates_en = [
             "What is the recommended build for {name}?",
             "What are the core items to buy on {name}?",
             "What is the full 6-item build for {name}?",
@@ -1154,34 +1746,80 @@ class TrainingDataGenerator:
             "What summoner spells should {name} take?",
             "What is the best keystone rune for {name}?",
             "What primary and secondary runes should I run on {name}?",
-            "Complete itemization guide and rune page for {name}",
+            "Complete itemization guide, starting items, and rune page for {name}",
             "What boots and core legendary items does {name} build?",
-            "Highest win rate build path, runes, and spells for {name}",
+            "Optimal build path, runes, and summoner spells for {name}",
             "What items give {name} their biggest power spike?",
+            "What starting items and summoner spells are optimal for {name}?",
+            "What does a full 6-item late game build look like for {name}?",
+            "What is the optimal primary and secondary rune setup for {name}?",
+            "Which items provide {name} with their most critical power spikes?",
         ]
 
-        sample_k = 9 if split_mode == "train" else 4
+        item_specific_en = [
+            "Why is {item} a core item on {name}?",
+            "Does {name} always rush {item} in their build path?",
+            "How does {item} synergize with {name}'s kit?",
+            "Why is {item} an essential core item for {name}?",
+            "What benefits does purchasing {item} give {name} in combat?",
+            "How does {item} synergize with {name}'s ability kit and playstyle?",
+        ]
 
-        for b_chunk in build_chunks:
-            name = b_chunk.entity_name
-            if not name:
+        keystone_specific_en = [
+            "Why do players take {keystone} on {name}?",
+            "What makes {keystone} the optimal keystone rune for {name}?",
+            "Why is {keystone} the preferred keystone rune on {name}?",
+            "What makes {keystone} the most optimal rune choice for {name}?",
+        ]
+
+        all_builds = {}
+        if builds:
+            all_builds.update(builds)
+        for cid, c in champions.items():
+            if cid not in all_builds and "builds" in c and isinstance(c["builds"], dict):
+                all_builds[cid] = c["builds"]
+
+        sample_k_gen = 5 if split_mode == "train" else 4
+        sample_k_item = 2 if split_mode == "train" else 2
+
+        for champ_key, data in all_builds.items():
+            champ_name = data.get("champion", champ_key)
+            b_chunk = b_chunks_by_name.get(champ_name.lower())
+            if not b_chunk:
                 continue
 
-            for tmpl in random.sample(build_templates, min(sample_k, len(build_templates))):
-                q = tmpl.format(name=name)
-                triplets.append(TrainingTriplet(q, b_chunk.text, self.get_negative(b_chunk), "build_loadout_en"))
+            neg_text = self.get_negative(b_chunk)
+
+            # 1. General templates
+            for tmpl in random.sample(build_templates_en, min(sample_k_gen, len(build_templates_en))):
+                q = tmpl.format(name=champ_name)
+                triplets.append(TrainingTriplet(q, b_chunk.text, neg_text, "build_loadout"))
+
+            # 2. Specific core item queries
+            core_items = data.get("coreItems", data.get("core_items", []))
+            for item in core_items[:3]:
+                if not item:
+                    continue
+                for tmpl in random.sample(item_specific_en, min(sample_k_item, len(item_specific_en))):
+                    q = tmpl.format(name=champ_name, item=item)
+                    triplets.append(TrainingTriplet(q, b_chunk.text, neg_text, "build_item_specific"))
+
+            # 3. Specific keystone rune queries
+            keystone = data.get("keystone")
+            if keystone:
+                tmpl = random.choice(keystone_specific_en)
+                q = tmpl.format(name=champ_name, keystone=keystone)
+                triplets.append(TrainingTriplet(q, b_chunk.text, neg_text, "build_keystone_specific"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
-    # Strategy 10: Strategic Win Conditions & Power Curves (NEW)
-    # ------------------------------------------------------------------------
+    # Strategy 10: Strategic Win Conditions & Power Curves (Bilingual EN/VI)
 
     def generate_strategic_queries(self, champions, split_mode = "all"):
-        """Generate strategic playstyle, power curve, and win condition queries."""
+        """Generate strategic playstyle, power curve, and win condition queries in English."""
         triplets = []
 
-        strategic_templates = [
+        strategic_templates_en = [
             "What is the primary win condition when playing {name}?",
             "How does {name} win games and close out matches?",
             "What is {name}'s power curve and when do they spike?",
@@ -1191,9 +1829,18 @@ class TrainingDataGenerator:
             "Is {name} better at splitpushing or grouping with the team?",
             "What are the strategic strengths and win conditions of {name}?",
             "How do you carry games with {name}'s strategic playstyle?",
+            "What is the key win condition when playing as {name}?",
+            "How does {name} close out games and secure victory?",
+            "At what point in the game does {name} reach peak power spikes?",
+            "Is {name} an early game snowballer or a scaling late game powerhouse?",
+            "What playstyle archetype (dive, poke, skirmish, frontline) suits {name}?",
+            "How should the team coordinate and fight teamfights around {name}?",
+            "Should {name} focus on splitpushing side lanes or grouping with the team?",
+            "What are {name}'s strategic win conditions and core macro strengths?",
+            "How to carry ranked games and execute {name}'s win condition?",
         ]
 
-        sample_k = 7 if split_mode == "train" else 3
+        sample_k = 5 if split_mode == "train" else 4
 
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
@@ -1206,15 +1853,193 @@ class TrainingDataGenerator:
             pos_chunk = overview_chunks[0]
             neg_chunk = self.get_negative(pos_chunk)
 
-            for tmpl in random.sample(strategic_templates, min(sample_k, len(strategic_templates))):
+            for tmpl in random.sample(strategic_templates_en, min(sample_k, len(strategic_templates_en))):
                 q = tmpl.format(name=name)
-                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "strategic_playstyle_en"))
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "strategic_playstyle"))
 
         return triplets
 
-    # ------------------------------------------------------------------------
+    # Strategy 11: Champion Subrole & Position queries
+
+    def generate_subrole_and_position_queries(self, champions, split_mode = "all"):
+        """Generate champion-specific queries about their subroles and lane positions in English."""
+        triplets = []
+
+        subrole_templates_en = [
+            "What subrole does {name} belong to in League of Legends?",
+            "What class subclass is {name}?",
+            "Is {name} categorized as {subrole}?",
+            "What tactical archetype and subrole describe {name}?",
+            "What kind of playstyle subclass is {name}?",
+            "What subclass and subrole does {name} fall under in LoL?",
+            "How is {name} classified within champion classes and subroles?",
+            "Is {name} considered a {subrole} champion?",
+            "What tactical archetype and combat role describe {name}?",
+        ]
+
+        position_templates_en = [
+            "What positions and lanes can {name} play?",
+            "What is {name}'s primary lane on Summoner's Rift?",
+            "Can {name} be played in {pos}?",
+            "What roles and lanes are recommended for {name}?",
+            "Is {name} played Top, Jungle, Mid, Bot, or Support?",
+            "What lanes and map roles is {name} viable in?",
+            "What is {name}'s primary lane and role on Summoner's Rift?",
+            "Can {name} be effectively played in the {pos} position?",
+            "What roles and positions are recommended for {name}?",
+            "Does {name} play Top, Jungle, Mid, Bot, or Support?",
+        ]
+
+        sample_k_sub = 3 if split_mode == "train" else 3
+        sample_k_pos = 3 if split_mode == "train" else 3
+
+        for champ_id, champ in champions.items():
+            name = champ.get("name", champ_id)
+            entity_chunks = self.chunks_by_entity.get(name.lower(), [])
+            overview_chunks = [c for c in entity_chunks if c.chunk_type == "overview"]
+            if not overview_chunks:
+                continue
+
+            pos_chunk = overview_chunks[0]
+            neg_chunk = self.get_negative(pos_chunk)
+
+            subroles = champ.get("subroles", [])
+            subrole_str = subroles[0] if subroles else "Fighter"
+            for tmpl in random.sample(subrole_templates_en, min(sample_k_sub, len(subrole_templates_en))):
+                q = tmpl.format(name=name, subrole=subrole_str)
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "champ_subrole"))
+
+            positions = champ.get("positions", [])
+            pos_str = positions[0] if positions else "TOP"
+            for tmpl in random.sample(position_templates_en, min(sample_k_pos, len(position_templates_en))):
+                q = tmpl.format(name=name, pos=pos_str)
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "champ_position"))
+
+        return triplets
+
+    # Strategy 12: Item Recipe & Build Path queries (NEW)
+
+    def generate_item_recipe_queries(self, items, split_mode = "all"):
+        """Generate recipe, build-from, build-into, and item stat queries in English."""
+        triplets = []
+        item_chunks = [c for c in self.chunks if c.chunk_type == "item_info"]
+        if not item_chunks:
+            return triplets
+
+        item_chunks_by_name = {c.entity_name.lower(): c for c in item_chunks}
+
+        recipe_templates_en = [
+            "What items are needed to build {name}?",
+            "What is the recipe and build path for {name}?",
+            "What item components combine into {name}?",
+            "What does {name} build into in League of Legends?",
+            "How much does {name} cost in gold and what are its stats?",
+            "What component items are required to craft {name}?",
+            "What is the crafting recipe and component path for the item {name}?",
+            "Which base items combine together to create {name}?",
+            "What higher-tier or legendary items does {name} build into?",
+            "How much total gold is required to buy {name} and what stats does it offer?",
+        ]
+
+        sample_k = 4 if split_mode == "train" else 3
+
+        for item_id, item in items.items():
+            name = item.get("name")
+            if not name:
+                continue
+            chunk = item_chunks_by_name.get(name.lower())
+            if not chunk:
+                continue
+
+            pos_chunk = chunk
+            neg_chunk = self.get_negative(pos_chunk)
+
+            for tmpl in random.sample(recipe_templates_en, min(sample_k, len(recipe_templates_en))):
+                q = tmpl.format(name=name)
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "item_recipe"))
+
+        return triplets
+
+    # Strategy 13: Rune Tree & Keystone queries (NEW)
+
+    def generate_rune_queries(self, runes, split_mode = "all"):
+        """Generate rune tree, keystone, and mechanical effect queries in English."""
+        triplets = []
+        rune_chunks = [c for c in self.chunks if c.chunk_type == "rune_info"]
+        if not rune_chunks:
+            return triplets
+
+        rune_chunks_by_name = {c.entity_name.lower(): c for c in rune_chunks}
+
+        rune_templates_en = [
+            "Which rune path or tree does {name} belong to?",
+            "What are the effects and gameplay mechanics of {name}?",
+            "How does the keystone or rune {name} work in combat?",
+            "What bonuses does {name} grant and who should take it?",
+            "Which rune path or tree does the {name} rune belong to?",
+            "What are the mechanical effects and bonuses granted by {name}?",
+            "How does keystone {name} trigger and scale during skirmishes?",
+            "What bonus stats does {name} grant and which champions benefit most?",
+        ]
+
+        sample_k = 3 if split_mode == "train" else 2
+
+        by_id = runes.get("byId", runes)
+        for r_id, rune in by_id.items():
+            name = rune.get("name")
+            if not name:
+                continue
+            chunk = rune_chunks_by_name.get(name.lower())
+            if not chunk:
+                continue
+
+            pos_chunk = chunk
+            neg_chunk = self.get_negative(pos_chunk)
+
+            for tmpl in random.sample(rune_templates_en, min(sample_k, len(rune_templates_en))):
+                q = tmpl.format(name=name)
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "rune_tree_effect"))
+
+        return triplets
+
+    # Strategy 14: CC Mechanics & Combat Effect queries (NEW)
+
+    def generate_cc_and_effect_queries(self, champions, split_mode = "all"):
+        """Generate champion-specific crowd control and combat mechanics queries in English."""
+        triplets = []
+
+        cc_templates_en = [
+            "What crowd control (CC) abilities does {name} have in their kit?",
+            "Does {name} have hard crowd control like stun, knockup, or suppression?",
+            "Does {name} have soft CC such as slows or roots?",
+            "What mobility, defensive, or offensive effects (dash, shield, heal, execute) does {name} possess?",
+            "What special mechanics or ability effects are unique to {name}?",
+            "What crowd control (CC) mechanics does {name} have in their kit?",
+            "Does {name} have hard CC like stuns, airborne knockups, or suppression?",
+            "Does {name} have soft CC abilities such as slows or grounding effects?",
+            "What ability effects (dash, shield, heal, execute, true damage) does {name} have?",
+            "What unique mechanics or special ability effects characterize {name}?",
+        ]
+
+        sample_k = 4 if split_mode == "train" else 3
+
+        for champ_id, champ in champions.items():
+            name = champ.get("name", champ_id)
+            entity_chunks = self.chunks_by_entity.get(name.lower(), [])
+            overview_chunks = [c for c in entity_chunks if c.chunk_type == "overview"]
+            if not overview_chunks:
+                continue
+
+            pos_chunk = overview_chunks[0]
+            neg_chunk = self.get_negative(pos_chunk)
+
+            for tmpl in random.sample(cc_templates_en, min(sample_k, len(cc_templates_en))):
+                q = tmpl.format(name=name)
+                triplets.append(TrainingTriplet(q, pos_chunk.text, neg_chunk, "champ_cc_effects"))
+
+        return triplets
+
     # Persistence
-    # ------------------------------------------------------------------------
 
     def save_triplets(self, triplets, output_path):
         """Save triplets to a JSON Lines file."""
@@ -1246,42 +2071,70 @@ class TrainingDataGenerator:
 def main():
     """CLI runner to generate train, val, test splits with zero data leakage."""
     parser = argparse.ArgumentParser(description = "Generate zero-leakage LoRA training triplets.")
-    parser.add_argument("--count", type = int, default = 10000, help = "Base target count (default: 10000)")
-    parser.add_argument("--train-count", type = int, default = 16000, help = "Expanded target training count (default: 16000)")
+    parser.add_argument("--count", type = int, default = 12000, help = "Base target count (default: 12000)")
+    parser.add_argument("--train-count", type = int, default = 12000, help = "Target training count (default: 12000)")
+    parser.add_argument("--val-count", type = int, default = 1200, help = "Target validation count (default: 1200)")
+    parser.add_argument("--test-count", type = int, default = 1200, help = "Target test count (default: 1200)")
     parser.add_argument("--train-ratio", type = float, default = 0.8, help = "Train split ratio (default: 0.8)")
     parser.add_argument("--val-ratio", type = float, default = 0.1, help = "Val split ratio (default: 0.1)")
     parser.add_argument("--test-ratio", type = float, default = 0.1, help = "Test split ratio (default: 0.1)")
     parser.add_argument("--seed", type = int, default = 42, help = "Random seed (default: 42)")
     parser.add_argument("--preserve-eval", action = "store_true", help = "Keep existing val and test splits")
-    parser.add_argument("--force-regen-eval", action = "store_true", help = "Force regenerating val and test splits")
+    parser.add_argument("--force-regen-eval", action = "store_true", default = True, help = "Force regenerating val and test splits")
+    parser.add_argument(
+        "--source",
+        choices = ["mongo", "auto", "files"],
+        default = "mongo",
+        help = "Data source: 'mongo' (default), 'auto', or 'files'",
+    )
+    parser.add_argument("--mongo-uri", type = str, default = None, help = "MongoDB connection URI (default: from .env)")
+    parser.add_argument("--mongo-db", type = str, default = None, help = "MongoDB database name (default: from .env)")
     args = parser.parse_args()
 
-    processed_dir = SRC_DIR / "processors" / "processed"
-    champs_path = processed_dir / "champions.json"
-    items_path = processed_dir / "items.json"
-    runes_path = processed_dir / "runes.json"
+    champions = None
+    items = None
+    runes = None
+    counters = None
+    synergies = None
+    builds = None
 
-    if not champs_path.exists():
-        print(f"Error: {champs_path} not found. Please run processors first.")
-        sys.exit(1)
+    # 1. Attempt loading from MongoDB if requested or auto
+    if args.source in ("auto", "mongo"):
+        mongo_data = load_from_mongodb(uri = args.mongo_uri, db_name = args.mongo_db)
+        if mongo_data:
+            champions, items, runes, counters, synergies, builds = mongo_data
+        elif args.source == "mongo":
+            print("[DataGenerator] ERROR: MongoDB source requested ('mongo') but connection/data was unavailable.")
+            print("                Please check that MongoDB is running at mongodb://localhost:27017 and database 'lol_rag_db' exists.")
+            sys.exit(1)
 
-    print(f"[DataGenerator] Loading data from {processed_dir}...")
-    with open(champs_path, "r", encoding = "utf-8") as f:
-        champions = json.load(f)
+    # 2. Fallback to local files if MongoDB data was not loaded
+    if not champions:
+        processed_dir = SRC_DIR / "processors" / "processed"
+        champs_path = processed_dir / "champions.json"
+        items_path = processed_dir / "items.json"
+        runes_path = processed_dir / "runes.json"
 
-    items = {}
-    if items_path.exists():
-        with open(items_path, "r", encoding = "utf-8") as f:
-            items = json.load(f)
+        if not champs_path.exists():
+            print(f"Error: {champs_path} not found. Please run processors first or start MongoDB.")
+            sys.exit(1)
 
-    runes = {}
-    if runes_path.exists():
-        with open(runes_path, "r", encoding = "utf-8") as f:
-            runes = json.load(f)
+        print(f"[DataGenerator] Loading data from files ({processed_dir})...")
+        with open(champs_path, "r", encoding = "utf-8") as f:
+            champions = json.load(f)
 
-    # Load KB data (counters, synergies, builds)
-    counters, synergies, builds = load_knowledge_base_data()
-    print(f"[DataGenerator] Loaded KB data: {len(counters)} counters, {len(synergies)} synergies, {len(builds)} builds")
+        items = {}
+        if items_path.exists():
+            with open(items_path, "r", encoding = "utf-8") as f:
+                items = json.load(f)
+
+        runes = {}
+        if runes_path.exists():
+            with open(runes_path, "r", encoding = "utf-8") as f:
+                runes = json.load(f)
+
+        counters, synergies, builds = load_knowledge_base_data()
+        print(f"[DataGenerator] Loaded KB data from files: {len(counters)} counters, {len(synergies)} synergies, {len(builds)} builds")
 
     generator = TrainingDataGenerator()
     splits = generator.generate_all_splits(
@@ -1298,6 +2151,8 @@ def main():
         seed = args.seed,
         preserve_eval = args.preserve_eval and not args.force_regen_eval,
         target_train_count = args.train_count,
+        target_val_count = args.val_count,
+        target_test_count = args.test_count,
     )
 
     # Audit data leakage
@@ -1322,20 +2177,14 @@ def main():
         print("  Status: WARNING - Overlap detected!")
     print("-" * 60)
 
-    # Save splits to src/training/
+    # Save splits to src/training/ (overwrites existing files)
     training_dir = SRC_DIR / "training"
     generator.save_triplets(splits["train"], str(training_dir / "train.jsonl"))
     generator.save_triplets(splits["val"], str(training_dir / "val.jsonl"))
     generator.save_triplets(splits["test"], str(training_dir / "test.jsonl"))
 
-    # Also save to src/data/training/ for compatibility
-    data_dir = SRC_DIR / "data" / "training"
-    generator.save_triplets(splits["train"], str(data_dir / "train.jsonl"))
-    generator.save_triplets(splits["val"], str(data_dir / "val.jsonl"))
-    generator.save_triplets(splits["test"], str(data_dir / "test.jsonl"))
-
     print(f"\n[DataGenerator] Splits saved: {len(splits['train'])} train, {len(splits['val'])} val, {len(splits['test'])} test.")
-    print(f"Locations: {training_dir} and {data_dir}.")
+    print(f"Location: {training_dir}")
 
 
 if __name__ == "__main__":
