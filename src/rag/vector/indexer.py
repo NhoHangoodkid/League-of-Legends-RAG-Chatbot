@@ -48,36 +48,70 @@ class Indexer:
         self.index_dir = index_dir
         self.chunker = DocumentChunker()
 
-    def build_index(self, clear=False):
+    def load_data(self, source="auto", mongo_uri=None, db_name=None):
         """
-        Execute the full indexing pipeline.
-
-        Args:
-            clear: If True, remove existing index before building.
-
-        Returns:
-            The populated VectorStore instance.
+        Load champions, items, runes, counters, synergies, and builds.
+        Supports 'auto' (MongoDB first, fallback to files), 'mongo', or 'files'.
         """
-        start = time.time()
-        print("-" * 60)
-        print("VECTOR INDEX BUILDER — Starting")
-        print("-" * 60)
+        if source in ("auto", "mongo"):
+            try:
+                from pymongo import MongoClient
+                import os
+                uri = mongo_uri or os.getenv("MONGO_URI", "mongodb://localhost:27017")
+                database = db_name or os.getenv("MONGO_DB_NAME", "lol_rag_db")
+                client = MongoClient(uri, serverSelectionTimeoutMS=3000)
+                client.admin.command("ping")
+                db = client[database]
 
-        # 1. Load data
-        print("\n[1/4] Loading processed data...")
+                champs = {doc["_id"]: doc for doc in db.champions.find()}
+                if champs:
+                    items = {doc["_id"]: doc for doc in db.items.find()}
+                    runes_docs = list(db.runes.find())
+                    by_id = {doc["_id"]: doc for doc in runes_docs if doc.get("type") != "tree"}
+                    by_tree = {doc.get("tree", doc["_id"].replace("tree_", "")): doc.get("runes", []) for doc in runes_docs if doc.get("type") == "tree"}
+                    runes = {"byId": by_id, "byTree": by_tree}
+                    counters = {doc["_id"]: doc for doc in db.counters.find()}
+                    synergies = {doc["_id"]: doc for doc in db.synergies.find()}
+                    builds = {doc["_id"]: doc for doc in db.builds.find()}
+
+                    print(f"[Indexer] Successfully loaded knowledge data from MongoDB ('{database}'):")
+                    print(f"  Champions: {len(champs)}, Items: {len(items)}, Runes: {len(by_id)}")
+                    print(f"  Counters:  {len(counters)}, Synergies: {len(synergies)}, Builds: {len(builds)}")
+                    return champs, items, runes, counters, synergies, builds
+            except Exception as e:
+                if source == "mongo":
+                    raise RuntimeError(f"Failed to load from MongoDB: {e}")
+                print(f"[Indexer] MongoDB unavailable ({e}), falling back to local files...")
+
+        # Fallback to files
+        print("[Indexer] Loading processed data from local files...")
         champions = self.load_json(PROCESSED_DIR / "champions.json")
         items = self.load_json(PROCESSED_DIR / "items.json")
         runes = self.load_json(PROCESSED_DIR / "runes.json")
         counters = self.load_counter_data()
         synergies = self.load_synergy_data()
         builds = self.load_build_data()
+        print(f"  Champions: {len(champions)}, Items: {len(items)}, Runes: {len(runes.get('byId', {}))}")
+        print(f"  Counters:  {len(counters)}, Synergies: {len(synergies)}, Builds: {len(builds)}")
+        return champions, items, runes, counters, synergies, builds
 
-        print(f"  Champions: {len(champions)}")
-        print(f"  Items: {len(items)}")
-        print(f"  Runes: {len(runes.get('byId', {}))}")
-        print(f"  Counters: {len(counters)}")
-        print(f"  Synergies: {len(synergies)}")
-        print(f"  Builds: {len(builds)}")
+    def build_index(self, clear=False, source="auto"):
+        """
+        Execute the full indexing pipeline.
+
+        Args:
+            clear: If True, remove existing index before building.
+            source: 'auto', 'mongo', or 'files'.
+
+        Returns:
+            The populated VectorStore instance.
+        """
+        start = time.time()
+        print("[Indexer] Starting Vector Index build...")
+
+        # 1. Load data
+        print("\n[1/4] Loading game knowledge data...")
+        champions, items, runes, counters, synergies, builds = self.load_data(source=source)
 
         # 2. Chunk
         print("\n[2/4] Chunking documents...")
@@ -128,15 +162,13 @@ class Indexer:
 
         elapsed = time.time() - start
         stats = store.get_stats()
-        print("\n" + "=" * 60)
-        print(f"VECTOR INDEX BUILT in {elapsed:.1f}s")
+        print(f"\n[Indexer] Vector Index built in {elapsed:.1f}s")
         print(f"  Total vectors: {stats['total_vectors']}")
         print(f"  Dimension: {stats['dimension']}")
         print(f"  GPU: {stats['gpu']}")
         print(f"  Entity types: {stats['entity_types']}")
         print(f"  Chunk types: {stats['chunk_types']}")
         print(f"  Saved to: {self.index_dir}")
-        print("-" * 60)
 
         return store
 
@@ -199,12 +231,14 @@ class Indexer:
 def main():
     parser = argparse.ArgumentParser(description="Build FAISS vector index for LoL Knowledge Bot")
     parser.add_argument("--clear", action="store_true", help="Rebuild index from scratch")
+    parser.add_argument("--source", type=str, choices=["auto", "mongo", "files"], default="auto",
+                        help="Data source: auto (MongoDB first, fallback to files), mongo, or files")
     parser.add_argument("--index-dir", type=str, default=str(DEFAULT_INDEX_DIR),
                         help="Directory to save the index")
     args = parser.parse_args()
 
     indexer = Indexer(index_dir=args.index_dir)
-    indexer.build_index(clear=args.clear)
+    indexer.build_index(clear=args.clear, source=args.source)
 
 
 if __name__ == "__main__":

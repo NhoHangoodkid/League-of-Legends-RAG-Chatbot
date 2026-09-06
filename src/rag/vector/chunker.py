@@ -94,16 +94,25 @@ class DocumentChunker:
 
         # 1. Overview chunk
         roles = ", ".join(champ.get("roles", []))
+        subroles = ", ".join(champ.get("subroles", []))
+        positions = ", ".join(champ.get("positions", []))
+        region = champ.get("region", "Runeterra")
         playstyles = ", ".join(champ.get("playstyles", []))
         power_curve = ", ".join(champ.get("powerCurve", []))
         win_conditions = ", ".join(champ.get("winConditions", []))
         cc_types = ", ".join(champ.get("cc_types", []))
         effects = ", ".join(champ.get("ability_effects", []))
         short_lore = champ.get("shortLore", "")
+        related = champ.get("related_champions", [])
+        related_names = [rc.get("name") if isinstance(rc, dict) else str(rc) for rc in related if rc]
+        related_str = ", ".join(related_names)
 
         overview_text = (
             f"{name} — {champ.get('title', '')}. "
+            f"Region: {region}. "
             f"Roles: {roles or 'Unknown'}. "
+            f"Subroles: {subroles or 'Unknown'}. "
+            f"Positions: {positions or 'Unknown'}. "
             f"Resource: {champ.get('resource', 'Mana')}. "
             f"Attack Type: {champ.get('attackType', 'Unknown')}. "
             f"Playstyles: {playstyles or 'Unknown'}. "
@@ -113,6 +122,8 @@ class DocumentChunker:
             f"Ability Effects: {effects or 'None'}. "
             f"Difficulty: {champ.get('difficulty', 0)}/10."
         )
+        if related_str:
+            overview_text += f" Related Champions: {related_str}."
         if short_lore:
             overview_text += f" Lore: {short_lore[:300]}"
 
@@ -125,6 +136,10 @@ class DocumentChunker:
             metadata={
                 "champion_id": champ_id,
                 "roles": champ.get("roles", []),
+                "subroles": champ.get("subroles", []),
+                "positions": champ.get("positions", []),
+                "region": region,
+                "related_champions": related_names,
                 "cc_types": champ.get("cc_types", []),
                 "effects": champ.get("ability_effects", []),
                 "playstyles": champ.get("playstyles", []),
@@ -191,13 +206,22 @@ class DocumentChunker:
         # 4. Lore chunk (if long enough for a separate chunk)
         lore = champ.get("lore", "")
         if lore and len(lore) > 100:
+            lore_text = f"{name} lore — Region: {region}."
+            if related_str:
+                lore_text += f" Related champions in lore: {related_str}."
+            lore_text += f" Story: {lore[:800]}"
+
             chunks.append(DocumentChunk(
                 chunk_id=f"champion:{champ_id}:lore",
-                text=f"{name} lore: {lore[:800]}",
+                text=lore_text.strip(),
                 entity_type="champion",
                 entity_name=name,
                 chunk_type="lore",
-                metadata={"champion_id": champ_id},
+                metadata={
+                    "champion_id": champ_id,
+                    "region": region,
+                    "related_champions": related_names,
+                },
             ))
 
         return chunks
@@ -271,21 +295,42 @@ class DocumentChunker:
 
         weak_against = data.get("weakAgainst", [])[:5]
         strong_against = data.get("strongAgainst", [])[:5]
+        weaknesses = data.get("weaknesses", [])
+        tactical_tips = data.get("tactical_tips", [])
+        counter_items = data.get("counter_items", [])
 
-        if not weak_against and not strong_against:
+        if not weak_against and not strong_against and not weaknesses and not tactical_tips:
             return []
 
-        lines = [f"{champ_name} counter matchups:"]
+        lines = [f"{champ_name} counter matchups & tactical guide:"]
+
+        if weaknesses:
+            lines.append("  Tactical Weaknesses:")
+            for w in weaknesses:
+                lines.append(f"    - {w}")
+
+        if tactical_tips:
+            lines.append("  Tactical Tips & Exploits:")
+            for tip in tactical_tips:
+                lines.append(f"    - {tip}")
+
+        if counter_items:
+            items_str = ", ".join(counter_items) if isinstance(counter_items, list) else str(counter_items)
+            lines.append(f"  Recommended Counter Items: {items_str}.")
+
         if weak_against:
-            lines.append("  Weak against (khắc chế bởi):")
+            lines.append("  Weak against (countered by):")
             for m in weak_against:
+                wr_part = f" (Win rate: {m['winRate']}%)" if m.get("winRate") is not None else ""
                 reason = f" — {m.get('reason')}" if m.get("reason") else ""
-                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%){reason}")
+                lines.append(f"    - {m.get('champion', '?')}{wr_part}{reason}")
+
         if strong_against:
-            lines.append("  Strong against (khắc chế tốt):")
+            lines.append("  Strong against (favorable matchup):")
             for m in strong_against:
+                wr_part = f" (Win rate: {m['winRate']}%)" if m.get("winRate") is not None else ""
                 reason = f" — {m.get('reason')}" if m.get("reason") else ""
-                lines.append(f"    - {m.get('champion', '?')} (Win rate: {m.get('winRate', '?')}%){reason}")
+                lines.append(f"    - {m.get('champion', '?')}{wr_part}{reason}")
 
         return [DocumentChunk(
             chunk_id=f"matchup:{champ_key}:counters",
@@ -303,13 +348,12 @@ class DocumentChunker:
             synergies = synergies.get("synergies", [])
 
         champ_name = data.get("champion", champ_key) if isinstance(data, dict) else champ_key
-        lines = [f"{champ_name} best duo partners:"]
+        lines = [f"{champ_name} best duo partners & synergies:"]
         for duo in (synergies if isinstance(synergies, list) else [])[:5]:
-            lines.append(
-                f"  - {duo.get('champion', '?')} "
-                f"(Duo win rate: {duo.get('duo_win_rate', duo.get('winRate', '?'))}%)"
-                f"{' — ' + duo.get('reason') if duo.get('reason') else ''}"
-            )
+            wr_val = duo.get("duo_win_rate") or duo.get("winRate")
+            wr_part = f" (Duo win rate: {wr_val}%)" if wr_val is not None else ""
+            reason = f" — {duo.get('reason')}" if duo.get("reason") else ""
+            lines.append(f"  - {duo.get('champion', '?')}{wr_part}{reason}")
 
         if len(lines) <= 1:
             return []
