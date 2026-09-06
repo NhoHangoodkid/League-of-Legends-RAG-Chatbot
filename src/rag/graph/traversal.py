@@ -113,7 +113,7 @@ class GraphTraversal:
         MATCH (counter:Champion)-[r:COUNTERS]->(c:Champion)
         WHERE c.champion_id = $name OR c.name =~ ('(?i).*' + $name + '.*')
         RETURN counter.name AS counter_name, counter.champion_id AS counter_id,
-               r.win_rate AS win_rate, r.games AS games
+               r.win_rate AS win_rate, r.games AS games, r.reason AS reason
         ORDER BY r.win_rate DESC
         LIMIT 10
         """
@@ -122,7 +122,7 @@ class GraphTraversal:
         MATCH (c:Champion)-[r:COUNTERS]->(weak:Champion)
         WHERE c.champion_id = $name OR c.name =~ ('(?i).*' + $name + '.*')
         RETURN weak.name AS weak_name, weak.champion_id AS weak_id,
-               r.win_rate AS win_rate, r.games AS games
+               r.win_rate AS win_rate, r.games AS games, r.reason AS reason
         ORDER BY r.win_rate DESC
         LIMIT 10
         """
@@ -133,7 +133,9 @@ class GraphTraversal:
         if weak_results:
             lines = [f"{name} bị khắc chế bởi:"]
             for wr in weak_results:
-                lines.append(f"  - {wr['counter_name']} (Win rate: {wr.get('win_rate', '?')}%)")
+                reason = wr.get("reason")
+                r_str = f" — Lý do: {reason}" if reason else ""
+                lines.append(f"  - {wr['counter_name']}{r_str}")
             results.append({"text": "\n".join(lines), "source": "graph:counters_weak", "score": 0.95,
                            "metadata": {"direction": "countered_by"}})
 
@@ -141,7 +143,9 @@ class GraphTraversal:
         if strong_results:
             lines = [f"{name} khắc chế tốt:"]
             for sr in strong_results:
-                lines.append(f"  - {sr['weak_name']} (Win rate: {sr.get('win_rate', '?')}%)")
+                reason = sr.get("reason")
+                r_str = f" — Lý do: {reason}" if reason else ""
+                lines.append(f"  - {sr['weak_name']}{r_str}")
             results.append({"text": "\n".join(lines), "source": "graph:counters_strong", "score": 0.90,
                            "metadata": {"direction": "counters"}})
 
@@ -156,7 +160,7 @@ class GraphTraversal:
         MATCH (c:Champion)-[r:SYNERGIZES_WITH]->(partner:Champion)
         WHERE c.champion_id = $name OR c.name =~ ('(?i).*' + $name + '.*')
         RETURN partner.name AS partner_name, partner.champion_id AS partner_id,
-               r.duo_win_rate AS duo_win_rate, r.games AS games
+               r.duo_win_rate AS duo_win_rate, r.games AS games, r.reason AS reason
         ORDER BY r.duo_win_rate DESC
         LIMIT 10
         """
@@ -166,7 +170,9 @@ class GraphTraversal:
 
         lines = [f"Đồng đội phối hợp tốt nhất với {name}:"]
         for r in results:
-            lines.append(f"  - {r['partner_name']} (Duo win rate: {r.get('duo_win_rate', '?')}%)")
+            reason = r.get("reason")
+            r_str = f" — Lý do: {reason}" if reason else ""
+            lines.append(f"  - {r['partner_name']}{r_str}")
 
         return [{"text": "\n".join(lines), "source": "graph:synergies", "score": 0.95,
                  "metadata": {"champion": name}}]
@@ -195,10 +201,10 @@ class GraphTraversal:
         runes = [ru["name"] for ru in r["runes"] if ru.get("name")]
 
         text = (
-            f"Build đề xuất cho {r['champ_name']}:\n"
-            f"  Trang bị cốt lõi: {', '.join(core_items) or 'N/A'}\n"
-            f"  Trang bị đầy đủ: {', '.join(all_items) or 'N/A'}\n"
-            f"  Ngọc bổ trợ: {', '.join(runes) or 'N/A'}"
+            f"Recommended build for {r['champ_name']}:\n"
+            f"  Core Items: {', '.join(core_items) or 'N/A'}\n"
+            f"  Full Build: {', '.join(all_items) or 'N/A'}\n"
+            f"  Runes: {', '.join(runes) or 'N/A'}"
         )
 
         return [{"text": text, "source": "graph:build", "score": 0.90,

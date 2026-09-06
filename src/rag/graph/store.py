@@ -14,7 +14,7 @@ from neo4j.exceptions import ServiceUnavailable, AuthError
 
 from rag.graph.schema import EdgeType, NodeType, GraphNode, GraphEdge
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "lolbot2024")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
@@ -92,6 +92,7 @@ class Neo4jStore:
             ("Playstyle", "name"),
             ("PowerCurve", "name"),
             ("WinCondition", "name"),
+            ("Chunk", "chunk_id"),
         ]
 
         with self.session() as sess:
@@ -174,13 +175,30 @@ class Neo4jStore:
 
                 for i in range(0, len(items), batch_size):
                     batch = items[i : i + batch_size]
-                    cypher = (
-                        f"UNWIND $batch AS props "
-                        f"MATCH (a:{src_label} {{{src_key}: props.source}}) "
-                        f"MATCH (b:{tgt_label} {{{tgt_key}: props.target}}) "
-                        f"MERGE (a)-[r:{rel_name}]->(b) "
-                        f"SET r += props"
-                    )
+                    if edge_type == EdgeType.USES_ITEM:
+                        cypher = (
+                            f"UNWIND $batch AS props "
+                            f"MATCH (a:Champion {{champion_id: props.source}}) "
+                            f"MATCH (b:Item) WHERE b.item_id = props.target OR b.name = props.target "
+                            f"MERGE (a)-[r:{rel_name}]->(b) "
+                            f"SET r += props"
+                        )
+                    elif edge_type == EdgeType.USES_RUNE:
+                        cypher = (
+                            f"UNWIND $batch AS props "
+                            f"MATCH (a:Champion {{champion_id: props.source}}) "
+                            f"MATCH (b:Rune) WHERE b.rune_id = props.target OR b.name = props.target "
+                            f"MERGE (a)-[r:{rel_name}]->(b) "
+                            f"SET r += props"
+                        )
+                    else:
+                        cypher = (
+                            f"UNWIND $batch AS props "
+                            f"MATCH (a:{src_label} {{{src_key}: props.source}}) "
+                            f"MATCH (b:{tgt_label} {{{tgt_key}: props.target}}) "
+                            f"MERGE (a)-[r:{rel_name}]->(b) "
+                            f"SET r += props"
+                        )
                     sess.run(cypher, batch=batch)
                 print(f"  Created {len(items)} {rel_name} edges")
 
@@ -317,6 +335,7 @@ class Neo4jStore:
             NodeType.ABILITY: "ability_id",
             NodeType.ITEM: "item_id",
             NodeType.RUNE: "rune_id",
+            NodeType.CHUNK: "chunk_id",
         }
         return mapping.get(node_type, "name")
 
@@ -339,6 +358,7 @@ class Neo4jStore:
             EdgeType.BUILDS_INTO: ("Item", "Item", "item_id", "item_id"),
             EdgeType.ABILITY_HAS_CC: ("Ability", "CrowdControl", "ability_id", "name"),
             EdgeType.ABILITY_HAS_EFFECT: ("Ability", "Effect", "ability_id", "name"),
+            EdgeType.HAS_CHUNK: ("Champion", "Chunk", "champion_id", "chunk_id"),
         }
         return mapping.get(
             edge_type,

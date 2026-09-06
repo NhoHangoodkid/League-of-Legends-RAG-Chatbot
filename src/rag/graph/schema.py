@@ -20,6 +20,7 @@ class NodeType(Enum):
     PLAYSTYLE = "Playstyle"
     POWER_CURVE = "PowerCurve"
     WIN_CONDITION = "WinCondition"
+    CHUNK = "Chunk"
 
 
 class EdgeType(Enum):
@@ -39,6 +40,7 @@ class EdgeType(Enum):
     BUILDS_INTO = "BUILDS_INTO"
     ABILITY_HAS_CC = "ABILITY_HAS_CC"
     ABILITY_HAS_EFFECT = "ABILITY_HAS_EFFECT"
+    HAS_CHUNK = "HAS_CHUNK"
 
 
 CHAMPION_PROPERTIES = [
