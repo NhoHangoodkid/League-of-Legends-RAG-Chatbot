@@ -23,10 +23,7 @@ except ImportError:
         from utils import PROCESSED_DIR, load_json, save_json, log, clean_html
 
 
-# ============================================================================
 # CC Keywords — tightened to reduce false positives
-# ============================================================================
-
 CC_KEYWORDS = {
     "Stun": [r"\bstuns?\b", r"\bstunned\b", r"\bstunning\b"],
     "Slow": [r"\bslows?\b", r"\bslowed\b", r"\bslowing\b"],
@@ -50,9 +47,7 @@ HARD_CC_TYPES = {"Stun", "Knockup", "Suppress", "Charm", "Fear", "Taunt", "Sleep
 SOFT_CC_TYPES = {"Slow", "Root", "Silence", "Blind", "Knockdown"}
 
 
-# ============================================================================
 # Effect Keywords — tightened to reduce false positives
-# ============================================================================
 
 EFFECT_KEYWORDS = {
     "Dash": [r"\bdash(?:es|ing)?\b", r"\bleap(?:s|ing)?\b", r"\bjump(?:s|ing)?\b", r"\blunge(?:s|ing)?\b"],

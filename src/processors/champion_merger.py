@@ -149,6 +149,9 @@ class ChampionMerger:
             "quote": quote,
             "related_champions": related_champions,
             "roles": roles,
+            "subroles": parsed_mk.get("roles", []),
+            "positions": parsed_mk.get("positions", []),
+            "attributeRatings": parsed_mk.get("attributeRatings", {}),
             "resource": parsed_mk.get("resource", "") or parsed_dd.get("partype", ""),
             "attackType": parsed_mk.get("attackType", ""),
             "adaptiveType": parsed_mk.get("adaptiveType", ""),
@@ -306,6 +309,8 @@ class ChampionMerger:
             "stats": stats,
             "abilities": abilities,
             "roles": raw.get("roles", []),
+            "positions": raw.get("positions", []),
+            "attributeRatings": raw.get("attributeRatings", {}),
             "lore": raw.get("lore", ""),
         }
 
