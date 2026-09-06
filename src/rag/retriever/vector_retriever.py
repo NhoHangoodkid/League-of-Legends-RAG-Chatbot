@@ -8,6 +8,12 @@ to find relevant document chunks based on query embedding.
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Ensure src/ is on path
 SRC_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SRC_DIR) not in sys.path:
@@ -115,20 +121,57 @@ class VectorRetriever:
         boosted.sort(key=lambda x: x["score"], reverse=True)
         return boosted[:top_k]
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Vector Retriever CLI for LoL Knowledge Bot")
+    parser.add_argument("--query", "-q", type=str, default=None, help="Direct query to retrieve relevant context")
+    parser.add_argument("--top-k", "-k", type=int, default=3, help="Number of chunks to retrieve (default: 3)")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Start interactive query loop")
+    args = parser.parse_args()
 
-if __name__ == "__main__":
-    print("[VectorRetriever] Testing vector retriever...")
+    print("[VectorRetriever] Initializing retriever...")
     retriever = VectorRetriever()
 
-    test_queries = [
-        "Who counters Yasuo?",
-        "What items should I build on Aatrox?",
-        "Tell me about Jinx lore",
-    ]
-
-    for q in test_queries:
-        print(f"\n[Query] '{q}'")
-        results = retriever.retrieve(q, top_k=2)
+    def print_results(query, k):
+        print(f"\n[Query] {query}")
+        results = retriever.retrieve(query, top_k=k)
+        if not results:
+            print("  (No results found)")
+            return
         for idx, res in enumerate(results, 1):
-            print(f"  Result {idx}: {res['source']} (score: {res['score']:.4f})")
-            print(f"  {res['text'][:120]}...")
+            source = res.get("source", "unknown")
+            score = res.get("score", 0.0)
+            meta = res.get("metadata", {})
+            entity = meta.get("entity_name", "N/A")
+            chunk_type = meta.get("chunk_type", "N/A")
+            print(f"\nResult #{idx} | Source: {source} | Score: {score:.4f} | Entity: {entity} ({chunk_type}):")
+            print(res["text"].strip())
+
+    if args.query:
+        print_results(args.query, args.top_k)
+    elif args.interactive:
+        print("\n[VectorRetriever] Interactive mode (Type 'exit' or 'q' to quit)")
+        while True:
+            try:
+                user_q = input("\nEnter query > ").strip()
+                if not user_q:
+                    continue
+                if user_q.lower() in ("exit", "quit", "q"):
+                    print("Exiting interactive mode.")
+                    break
+                print_results(user_q, args.top_k)
+            except (KeyboardInterrupt, EOFError):
+                print("\nExiting interactive mode.")
+                break
+    else:
+        test_queries = [
+            "Who counters Yasuo?",
+            "What items should I build on Aatrox?",
+            "Tell me about Jinx lore",
+        ]
+        for q in test_queries:
+            print_results(q, 2)
+
+
+if __name__ == "__main__":
+    main()
