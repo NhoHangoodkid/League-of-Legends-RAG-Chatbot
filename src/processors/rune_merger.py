@@ -9,16 +9,8 @@ Output: src/processors/processed/runes.json
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
 
-try:
-    from .utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
-except ImportError:
-    try:
-        from processors.utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
-    except ImportError:
-        from utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
-
+from .utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
 
 
 class RuneMerger:
@@ -90,8 +82,6 @@ class RuneMerger:
         return save_json(data, PROCESSED_DIR / "runes.json")
 
     @staticmethod
-    def load_json(path: Path):
+    def load_json(path):
         """Load JSON file."""
         return load_json(path)
-
-

@@ -13,52 +13,20 @@ import json
 import re
 from pathlib import Path
 
-try:
-    from .utils import (
-        CDRAGON_RAW_DIR,
-        DDRAGON_RAW_DIR,
-        LORE_RAW_DIR,
-        MERAKI_RAW_DIR,
-        PROCESSED_DIR,
-        load_json,
-        save_json,
-        log,
-        normalize_champion_id,
-        get_champion_aliases,
-        build_lore_key_map,
-        clean_html,
-    )
-except ImportError:
-    try:
-        from processors.utils import (
-            CDRAGON_RAW_DIR,
-            DDRAGON_RAW_DIR,
-            LORE_RAW_DIR,
-            MERAKI_RAW_DIR,
-            PROCESSED_DIR,
-            load_json,
-            save_json,
-            log,
-            normalize_champion_id,
-            get_champion_aliases,
-            build_lore_key_map,
-            clean_html,
-        )
-    except ImportError:
-        from utils import (
-            CDRAGON_RAW_DIR,
-            DDRAGON_RAW_DIR,
-            LORE_RAW_DIR,
-            MERAKI_RAW_DIR,
-            PROCESSED_DIR,
-            load_json,
-            save_json,
-            log,
-            normalize_champion_id,
-            get_champion_aliases,
-            build_lore_key_map,
-            clean_html,
-        )
+from .utils import (
+    CDRAGON_RAW_DIR,
+    DDRAGON_RAW_DIR,
+    LORE_RAW_DIR,
+    MERAKI_RAW_DIR,
+    PROCESSED_DIR,
+    load_json,
+    save_json,
+    log,
+    normalize_champion_id,
+    get_champion_aliases,
+    build_lore_key_map,
+    clean_html,
+)
 
 
 class ChampionMerger:

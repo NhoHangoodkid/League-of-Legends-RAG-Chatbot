@@ -11,63 +11,37 @@ Output: src/processors/processed/items.json
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-try:
-    from .utils import (
-        CDRAGON_RAW_DIR,
-        DDRAGON_RAW_DIR,
-        PROCESSED_DIR,
-        load_json,
-        save_json,
-        log,
-        clean_html,
-        normalize_item_stats,
-    )
-except ImportError:
-    try:
-        from processors.utils import (
-            CDRAGON_RAW_DIR,
-            DDRAGON_RAW_DIR,
-            PROCESSED_DIR,
-            load_json,
-            save_json,
-            log,
-            clean_html,
-            normalize_item_stats,
-        )
-    except ImportError:
-        from utils import (
-            CDRAGON_RAW_DIR,
-            DDRAGON_RAW_DIR,
-            PROCESSED_DIR,
-            load_json,
-            save_json,
-            log,
-            clean_html,
-            normalize_item_stats,
-        )
-
+from .utils import (
+    CDRAGON_RAW_DIR,
+    DDRAGON_RAW_DIR,
+    PROCESSED_DIR,
+    load_json,
+    save_json,
+    log,
+    clean_html,
+    normalize_item_stats,
+)
 
 # Common item shorthand aliases for search enrichment
 ITEM_ALIASES = {
     # Mythic / Legendary common abbreviations
-    "Infinity Edge": ["IE", "Vô Cực Kiếm"],
-    "Rabadon's Deathcap": ["Rabadon", "Deathcap", "Mũ phù thủy"],
-    "Zhonya's Hourglass": ["Zhonya", "Zhonyas", "Đồng hồ cát"],
-    "Guardian Angel": ["GA", "Thiên thần"],
-    "Blade of the Ruined King": ["BOTRK", "BotRK", "Kiếm vua hủy diệt"],
-    "Thornmail": ["Giáp gai"],
+    "Infinity Edge": ["IE"],
+    "Rabadon's Deathcap": ["Rabadon", "Deathcap"],
+    "Zhonya's Hourglass": ["Zhonya", "Zhonyas"],
+    "Guardian Angel": ["GA"],
+    "Blade of the Ruined King": ["BOTRK", "BotRK"],
+    "Thornmail": ["Thorn"],
     "Randuin's Omen": ["Randuin", "Randuins"],
     "Dead Man's Plate": ["DMP", "Deadmans"],
-    "Spirit Visage": ["SV", "Áo linh hồn"],
+    "Spirit Visage": ["SV"],
     "Warmog's Armor": ["Warmog", "Warmogs"],
     "Banshee's Veil": ["Banshee", "Banshees"],
     "Morellonomicon": ["Morello"],
     "Hextech Rocketbelt": ["Rocketbelt", "Protobelt"],
     "Luden's Companion": ["Luden", "Ludens"],
-    "Trinity Force": ["Triforce", "TF item", "Tam hợp kiếm"],
-    "Black Cleaver": ["BC", "Rìu đen"],
+    "Trinity Force": ["Triforce", "TF item"],
+    "Black Cleaver": ["BC"],
     "Death's Dance": ["DD"],
     "Sterak's Gage": ["Sterak", "Steraks"],
     "Kraken Slayer": ["Kraken"],
@@ -87,8 +61,8 @@ class ItemMerger:
     """Merge raw item data from DDragon and CDragon."""
 
     def __init__(self):
-        self.ddragon_data: Dict = {}
-        self.cdragon_data: Dict = {}
+        self.ddragon_data = {}
+        self.cdragon_data = {}
 
     def merge(self):
         """Load and merge item data from all sources."""

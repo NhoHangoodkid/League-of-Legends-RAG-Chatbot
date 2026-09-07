@@ -14,13 +14,7 @@ import json
 import re
 from pathlib import Path
 
-try:
-    from .utils import PROCESSED_DIR, load_json, save_json, log, clean_html
-except ImportError:
-    try:
-        from processors.utils import PROCESSED_DIR, load_json, save_json, log, clean_html
-    except ImportError:
-        from utils import PROCESSED_DIR, load_json, save_json, log, clean_html
+from .utils import PROCESSED_DIR, load_json, save_json, log, clean_html
 
 
 # CC Keywords — tightened to reduce false positives

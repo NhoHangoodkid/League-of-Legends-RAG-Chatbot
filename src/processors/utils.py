@@ -8,12 +8,9 @@ along with common JSON I/O, logging, and name normalization utilities.
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 
-# ============================================================================
 # Path Configuration
-# ============================================================================
 
 # Processors directory: src/processors
 PROCESSORS_DIR = Path(__file__).resolve().parent
@@ -28,7 +25,7 @@ PROJECT_ROOT = SRC_DIR.parent
 PROCESSED_DIR = PROCESSORS_DIR / "processed"
 
 
-def find_raw_dir() -> Path:
+def find_raw_dir():
     """
     Locate the raw data directory with fallbacks:
     1. src/collectors/raw (Active storage)
@@ -64,13 +61,11 @@ def ensure_dirs():
         d.mkdir(parents = True, exist_ok = True)
 
 
-# ============================================================================
 # Champion Name Normalization & Alias Registry
-# ============================================================================
 
 # Maps variant names/IDs → canonical champion ID used in DDragon.
 # This handles discrepancies across DDragon, CDragon, Meraki, Lore, and user queries.
-CHAMPION_ALIASES: Dict[str, str] = {
+CHAMPION_ALIASES = {
     # CDragon capitalization mismatch
     "FiddleSticks": "Fiddlesticks",
     # Lore data key mismatch
@@ -136,7 +131,7 @@ CHAMPION_ALIASES: Dict[str, str] = {
 }
 
 # Reverse lookup: canonical ID → list of known aliases (for search enrichment)
-_REVERSE_ALIASES: Dict[str, List[str]] = {}
+_REVERSE_ALIASES = {}
 for _alias, _canonical in CHAMPION_ALIASES.items():
     if _canonical == "__SKIP__":
         continue
@@ -146,12 +141,12 @@ for _alias, _canonical in CHAMPION_ALIASES.items():
         _REVERSE_ALIASES[_canonical].append(_alias)
 
 
-def get_champion_aliases(canonical_id: str) -> List[str]:
+def get_champion_aliases(canonical_id):
     """Get all known aliases for a canonical champion ID."""
     return _REVERSE_ALIASES.get(canonical_id, [])
 
 
-def normalize_champion_id(raw_key: str) -> Optional[str]:
+def normalize_champion_id(raw_key):
     """
     Normalize any champion name/key variant to the canonical DDragon ID.
 
@@ -181,7 +176,7 @@ def normalize_champion_id(raw_key: str) -> Optional[str]:
     return raw_key
 
 
-def build_lore_key_map(lore_keys: set, master_ids: set) -> Dict[str, str]:
+def build_lore_key_map(lore_keys, master_ids):
     """
     Build a mapping from lore data keys to canonical champion IDs.
 
@@ -198,12 +193,10 @@ def build_lore_key_map(lore_keys: set, master_ids: set) -> Dict[str, str]:
     return lore_map
 
 
-# ============================================================================
 # Item Stat Key Normalization
-# ============================================================================
 
 # Maps Riot's internal stat property names to human-readable keys.
-ITEM_STAT_MAPPING: Dict[str, str] = {
+ITEM_STAT_MAPPING = {
     # Flat stats
     "FlatPhysicalDamageMod": "attack_damage",
     "FlatMagicDamageMod": "ability_power",
@@ -241,7 +234,7 @@ ITEM_STAT_MAPPING: Dict[str, str] = {
 }
 
 
-def normalize_item_stats(raw_stats: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_item_stats(raw_stats):
     """
     Normalize Riot's internal stat keys to human-readable form.
 
@@ -257,11 +250,9 @@ def normalize_item_stats(raw_stats: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-# ============================================================================
 # Text Cleaning Utilities
-# ============================================================================
 
-def clean_html(text: str) -> str:
+def clean_html(text):
     """
     Remove HTML/XML tags from game descriptions.
     Handles Riot-specific tags like <mainText>, <stats>, <font color>, etc.
@@ -273,7 +264,7 @@ def clean_html(text: str) -> str:
     return cleaned
 
 
-def clean_text(text: str) -> str:
+def clean_text(text):
     """
     Comprehensive text cleaner: strips HTML, normalizes whitespace,
     removes Riot placeholder tokens like {{ e1 }}, @Effect1Amount@.
@@ -290,9 +281,7 @@ def clean_text(text: str) -> str:
     return cleaned
 
 
-# ============================================================================
 # JSON I/O
-# ============================================================================
 
 def load_json(path):
     """Load JSON file safely. Returns empty dict/list if not found."""

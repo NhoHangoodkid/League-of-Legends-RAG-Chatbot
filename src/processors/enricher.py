@@ -14,13 +14,7 @@ Zero hardcoded champion name dictionaries. Designed to scale seamlessly to 1,000
 import os
 
 
-try:
-    from .utils import PROCESSED_DIR, load_json, save_json, log
-except ImportError:
-    try:
-        from processors.utils import PROCESSED_DIR, load_json, save_json, log
-    except ImportError:
-        from utils import PROCESSED_DIR, load_json, save_json, log
+from .utils import PROCESSED_DIR, load_json, save_json, log
 
 
 # Tunable Heuristic Thresholds (Centralized Configuration)

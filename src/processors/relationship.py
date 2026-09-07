@@ -11,46 +11,21 @@ Generates structured relationship and matchup data for LoL Knowledge Bot:
 import shutil
 from pathlib import Path
 
-try:
-    from .utils import (
-        DDRAGON_RAW_DIR,
-        PROCESSED_DIR,
-        SRC_DIR,
-        ensure_dirs,
-        load_json,
-        log,
-        save_json,
-    )
-except ImportError:
-    try:
-        from processors.utils import (
-            DDRAGON_RAW_DIR,
-            PROCESSED_DIR,
-            SRC_DIR,
-            ensure_dirs,
-            load_json,
-            log,
-            save_json,
-        )
-    except ImportError:
-        from utils import (
-            DDRAGON_RAW_DIR,
-            PROCESSED_DIR,
-            SRC_DIR,
-            ensure_dirs,
-            load_json,
-            log,
-            save_json,
-        )
+from .utils import (
+    DDRAGON_RAW_DIR,
+    PROCESSED_DIR,
+    SRC_DIR,
+    ensure_dirs,
+    load_json,
+    log,
+    save_json,
+)
 
 # Default knowledge base storage directory
 KB_DIR = SRC_DIR / "data" / "knowledge_base"
 
 
-# ============================================================================
 # Automated Relationship Scoring Configuration
-
-# ============================================================================
 
 # Starting items mapped by primary role
 STARTING_ITEMS_BY_ROLE = {
@@ -865,7 +840,7 @@ class RelationshipGenerator:
 
         archetype = RelationshipGenerator._get_champion_archetype(roles, subroles, adaptive)
 
-        # --- Item Selection via Scoring ---
+        # Item Selection via Scoring
         completed_items = []
         boot_items = []
 
@@ -912,15 +887,15 @@ class RelationshipGenerator:
             full_build.append(best_boots)
         full_build = full_build[:6]
 
-        # --- Starting Items ---
+        # Starting Items
         primary_role = roles[0] if roles else "fighter"
         starting = list(STARTING_ITEMS_BY_ROLE.get(primary_role, ["Doran's Blade", "Health Potion"]))
 
-        # --- Summoner Spells ---
+        # Summoner Spells
         primary_pos = positions[0] if positions else "MID"
         spells = list(SUMMONER_SPELLS_BY_POSITION.get(primary_pos, ["Flash", "Ignite"]))
 
-        # --- Runes ---
+        # Runes
         keystone, primary_runes, secondary_runes = RelationshipGenerator._select_runes(
             archetype, subroles, runes_dict
         )

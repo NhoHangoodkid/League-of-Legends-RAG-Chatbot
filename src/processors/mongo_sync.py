@@ -10,7 +10,7 @@ Synchronizes processed knowledge base data into MongoDB collections:
 - runes: Rune perks and trees (perk descriptions, tree categories)
 
 Outputs:
-- MongoDB collections: champions, counters, synergies, builds, items, runes in database 'lol_rag_db'
+- MongoDB collections: champions, counters, synergies, builds, items, runes, relationships, team_compositions in database 'lol_rag_db'
 """
 
 import json
@@ -18,34 +18,14 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    from .utils import (
-        PROCESSED_DIR,
-        PROJECT_ROOT,
-        SRC_DIR,
-        load_json,
-        log,
-        save_json,
-    )
-except ImportError:
-    try:
-        from processors.utils import (
-            PROCESSED_DIR,
-            PROJECT_ROOT,
-            SRC_DIR,
-            load_json,
-            log,
-            save_json,
-        )
-    except ImportError:
-        from utils import (
-            PROCESSED_DIR,
-            PROJECT_ROOT,
-            SRC_DIR,
-            load_json,
-            log,
-            save_json,
-        )
+from .utils import (
+    PROCESSED_DIR,
+    PROJECT_ROOT,
+    SRC_DIR,
+    load_json,
+    log,
+    save_json,
+)
 
 # Load environment configuration
 try:
@@ -370,10 +350,39 @@ class MongoSyncManager:
 
         return len(operations)
 
+    def sync_team_compositions(self, compositions_data = None):
+        """
+        Synchronize analyzed champion archetype team compositions into MongoDB 'team_compositions' collection.
+        Enables O(1) retrieval for team archetype counter matchups, items, and weaknesses.
+        """
+        if not self.is_connected() or not compositions_data:
+            return 0
+
+        # Purge existing collection to guarantee zero residual Vietnamese or legacy hardcoded documents
+        self.db.team_compositions.delete_many({})
+
+        operations = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for comp_id, cdata in compositions_data.items():
+            doc = dict(cdata)
+            doc["_id"] = str(comp_id)
+            doc["updated_at"] = now_iso
+            operations.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert = True))
+
+        if operations:
+            self.db.team_compositions.bulk_write(operations, ordered = False)
+            self.db.team_compositions.create_index("comp_id")
+            self.db.team_compositions.create_index("category")
+            self.db.team_compositions.create_index("aliases")
+            log(TAG, f"Synced {len(operations)} team compositions -> 'team_compositions'")
+
+        return len(operations)
+
     def sync_all(self, results = None, kb_dir = None, processed_dir = None):
-        """Synchronize all knowledge base datasets (champions, items, runes, relationships) to MongoDB."""
+        """Synchronize all knowledge base datasets (champions, items, runes, relationships, compositions) to MongoDB."""
         if not self.is_connected():
-            return {"champions": 0, "items": 0, "runes": 0, "counters": 0, "synergies": 0, "builds": 0, "relationships": 0}
+            return {"champions": 0, "items": 0, "runes": 0, "counters": 0, "synergies": 0, "builds": 0, "relationships": 0, "team_compositions": 0}
 
         results = results or {}
         champions = results.get("champions") or results.get("enriched_champions")
@@ -383,6 +392,7 @@ class MongoSyncManager:
         relationships = results.get("relationships")
         items = results.get("items")
         runes = results.get("runes")
+        team_compositions = results.get("team_compositions")
 
         log(TAG, "STARTING MONGODB SYNCHRONIZATION")
 
@@ -406,12 +416,13 @@ class MongoSyncManager:
         i_count = self.sync_items(items, processed_dir = processed_dir)
         r_count = self.sync_runes(runes, processed_dir = processed_dir)
         rel_count = self.sync_relationships(relationships)
+        comp_count = self.sync_team_compositions(team_compositions)
 
         log(
             TAG,
             f"COMPLETED: {c_count} champions, {i_count} items, {r_count} runes, "
             f"{counter_count} counters, {synergy_count} synergies, {build_count} builds, "
-            f"{rel_count} relationships synced to '{self.db_name}'."
+            f"{rel_count} relationships, {comp_count} team compositions synced to '{self.db_name}'."
         )
 
         return {
@@ -422,6 +433,7 @@ class MongoSyncManager:
             "synergies": synergy_count,
             "builds": build_count,
             "relationships": rel_count,
+            "team_compositions": comp_count,
         }
 
     def close(self):
