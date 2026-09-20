@@ -47,3 +47,31 @@ sources:
       champion_browse: "champion-browse/index.json"
       champion_detail: "champions/{slug}/index.json"
 
+  oracles_elixir:
+    name: "Oracle's Elixir Esports Data (Season 2025)"
+    default_year: 2025
+    download_url_2025: "https://drive.google.com/uc?export=download&id=1v6LRphp2kYciU4SXp0PCjEMuev1bDejc"
+    filename_2025: "2025_LoL_esports_match_data.csv"
+
+
+
+  opgg_synergy:
+    name: "OP.GG MCP Synergy Service"
+    mcp_url: "https://mcp-api.op.gg/mcp"
+    default_synergy_pairs:
+      - my_position: "adc"
+        synergy_position: "support"
+        filename: "synergies_adc_support.json"
+      - my_position: "mid"
+        synergy_position: "jungle"
+        filename: "synergies_mid_jungle.json"
+      - my_position: "top"
+        synergy_position: "jungle"
+        filename: "synergies_top_jungle.json"
+
+  blitz:
+    name: "Blitz.gg Tactical Insights and Matchups"
+    base_url: "https://blitz.gg/lol/champions"
+    seed_champion: "ashe"
+
+

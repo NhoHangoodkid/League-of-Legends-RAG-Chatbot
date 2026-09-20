@@ -9,10 +9,11 @@ Provides common helper functions across collectors:
 - JSON file I/O utilities (safe save, load, cache checks).
 """
 
+import html
 import json
+import re
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 import requests
 import yaml
@@ -33,27 +34,26 @@ def find_config_path():
 
 
 # Path to the active collector configuration.
-CONFIG_PATH = find_config_path()
+config_path = find_config_path()
 
 # In-memory cached instances.
-CONFIG: Optional[Dict[str, Any]] = None
-SESSION: Optional[requests.Session] = None
-LAST_REQUEST_TIME: float = 0.0
-CACHED_DDRAGON_VERSION: Optional[str] = None
-
+config = None
+session = None
+last_request_time = 0.0
+cached_ddragon_version = None
 
 
 def load_collector_config(config_path = None):
     """Load and parse configuration from the YAML file. Caches the parsed dictionary in memory."""
-    global CONFIG
-    if CONFIG is None:
+    global config
+    if config is None:
         path = config_path or find_config_path()
         if path.exists():
             with open(path, "r", encoding = "utf-8") as f:
-                CONFIG = yaml.safe_load(f) or {}
+                config = yaml.safe_load(f) or {}
         else:
-            CONFIG = {}
-    return CONFIG
+            config = {}
+    return config
 
 
 def get_setting(key, default = None):
@@ -88,24 +88,26 @@ def get_raw_dir(source_name):
 
 
 # Direct access to subdirectories in collectors/raw/
-DDRAGON_RAW_DIR = get_raw_dir("ddragon")
-CDRAGON_RAW_DIR = get_raw_dir("cdragon")
-MERAKI_RAW_DIR = get_raw_dir("meraki")
-LORE_RAW_DIR = get_raw_dir("lore")
-
+DDRAGON_raw_dir = get_raw_dir("ddragon")
+CDRAGON_raw_dir = get_raw_dir("cdragon")
+MERAKI_raw_dir = get_raw_dir("meraki")
+LORE_raw_dir = get_raw_dir("lore")
+ORACLES_ELIXIR_raw_dir = get_raw_dir("oracles_elixir")
+OPGG_SYNERGY_raw_dir = get_raw_dir("opgg_synergy")
+BLITZ_raw_dir = get_raw_dir("blitz")
 
 
 def get_session():
     """Get or initialize a shared requests.Session singleton."""
-    global SESSION
-    if SESSION is None:
+    global session
+    if session is None:
         user_agent = get_setting("user_agent", "LoLKnowledgeBot/1.0 (Educational Project)")
-        SESSION = requests.Session()
-        SESSION.headers.update({
+        session = requests.Session()
+        session.headers.update({
             "User-Agent": user_agent,
             "Accept": "application/json",
         })
-    return SESSION
+    return session
 
 
 def log(tag, message):
@@ -115,7 +117,7 @@ def log(tag, message):
 
 def fetch_json(url, session = None, retries = None, delay = None, timeout = None, tag = "Collector"):
     """Fetch and parse JSON from a URL with built-in rate-limiting, retries, and error handling."""
-    global LAST_REQUEST_TIME
+    global last_request_time
     sess = session or get_session()
 
     # Fallback to YAML configuration settings if arguments are omitted.
@@ -126,11 +128,11 @@ def fetch_json(url, session = None, retries = None, delay = None, timeout = None
     for attempt in range(1, retries + 1):
         try:
             # Rate Limiting: enforce minimum delay between successive calls.
-            elapsed = time.time() - LAST_REQUEST_TIME
+            elapsed = time.time() - last_request_time
             if elapsed < delay:
                 time.sleep(delay - elapsed)
 
-            LAST_REQUEST_TIME = time.time()
+            last_request_time = time.time()
 
             # Perform HTTP GET request.
             response = sess.get(url, timeout = timeout)
@@ -172,9 +174,9 @@ def fetch_json(url, session = None, retries = None, delay = None, timeout = None
 
 def get_latest_ddragon_version():
     """Fetch and cache the latest Data Dragon patch version string from Riot API or collector.yaml."""
-    global CACHED_DDRAGON_VERSION
-    if CACHED_DDRAGON_VERSION is not None:
-        return CACHED_DDRAGON_VERSION
+    global cached_ddragon_version
+    if cached_ddragon_version is not None:
+        return cached_ddragon_version
 
     dd_conf = get_source_config("ddragon")
     versions_url = dd_conf.get("versions_url")
@@ -184,14 +186,13 @@ def get_latest_ddragon_version():
         try:
             versions = fetch_json(versions_url, tag = "DDragon", retries = 2, timeout = 10)
             if versions and isinstance(versions, list) and len(versions) > 0:
-                CACHED_DDRAGON_VERSION = str(versions[0])
-                return CACHED_DDRAGON_VERSION
+                cached_ddragon_version = str(versions[0])
+                return cached_ddragon_version
         except Exception as e:
             log("DDragon", f"Could not fetch latest version from Riot API: {e}")
 
-    CACHED_DDRAGON_VERSION = default_version
-    return CACHED_DDRAGON_VERSION
-
+    cached_ddragon_version = default_version
+    return cached_ddragon_version
 
 
 def build_ddragon_url(endpoint_key, version, **kwargs):
@@ -231,7 +232,6 @@ def build_universe_url(endpoint_key, **kwargs):
     return f"{base_url}/{endpoint}"
 
 
-
 def save_json(data, filepath, indent = 2):
     """Serialize and save Python data structure to a JSON file."""
     filepath.parent.mkdir(parents = True, exist_ok = True)
@@ -251,3 +251,62 @@ def load_json(filepath):
 def has_cached(filepath):
     """Check if a cached file exists at the given path."""
     return filepath.exists()
+
+
+# Text and Data Cleaning Utilities
+
+def clean_html(text):
+    """
+    Strip HTML/XML tags and unescape entities into clean plain text.
+    Handles standard HTML tags as well as Riot-specific tags (<mainText>, <stats>, <font color>, etc.).
+    """
+    if not text:
+        return ""
+    # Replace paragraph and line breaks with newlines
+    text = re.sub(r"<\s*/?\s*p\s*>", "\n\n", text, flags = re.IGNORECASE)
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags = re.IGNORECASE)
+    # Remove all other XML/HTML tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Unescape HTML entities (&amp;, &quot;, &#39;, etc.)
+    text = html.unescape(text)
+    # Normalize multiple newlines and spaces
+    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in text.split("\n") if p.strip()]
+    return "\n\n".join(paragraphs)
+
+
+def clean_riot_tokens(text):
+    """
+    Convert Riot internal formula tokens and spell references to readable text.
+    E.g. @spell_P@ -> 'Passive', @spell_Q@ -> 'Q', {{ e1 }} -> ''
+    """
+    if not text:
+        return ""
+    # Convert spell slot placeholders
+    replacements = {
+        r"@spell_P@": "Passive",
+        r"@spell_Q@": "Q",
+        r"@spell_W@": "W",
+        r"@spell_E@": "E",
+        r"@spell_R@": "R",
+    }
+    for pattern, rep in replacements.items():
+        text = re.sub(pattern, rep, text, flags = re.IGNORECASE)
+
+    # Remove lingering formula placeholders like {{ e1 }}, @Effect1Amount@
+    text = re.sub(r"\{\{[^}]+\}\}", " ", text)
+    text = re.sub(r"@[^@]+@", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def clean_text(text):
+    """
+    Comprehensive text cleaner: strips HTML, unescapes entities,
+    resolves Riot spell tokens, and normalizes whitespace.
+    """
+    if not text:
+        return ""
+    text = clean_html(text)
+    text = clean_riot_tokens(text)
+    return text
+

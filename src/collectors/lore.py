@@ -11,18 +11,20 @@ import re
 from tqdm import tqdm
 
 from collectors.utils import (
-    LORE_RAW_DIR,
+    LORE_raw_dir,
     build_universe_url,
+    clean_html,
     fetch_json,
     log,
     save_json,
 )
 
-TAG = "RiotUniverse"
+
+tag = "RiotUniverse"
 
 
 # Standard faction slug to human-readable region name
-FACTION_MAP = {
+faction_map = {
     "bandle-city": "Bandle City",
     "bilgewater": "Bilgewater",
     "demacia": "Demacia",
@@ -40,7 +42,7 @@ FACTION_MAP = {
 }
 
 # Mapping Universe champion slugs / names to Canonical DDragon Champion IDs
-SLUG_TO_CANONICAL_ID = {
+slug_to_canonical_id = {
     "aatrox": "Aatrox",
     "ahri": "Ahri",
     "akali": "Akali",
@@ -166,6 +168,7 @@ SLUG_TO_CANONICAL_ID = {
     "renata": "Renata",
     "renata-glasc": "Renata",
     "renata_glasc": "Renata",
+    "renataglasc": "Renata",
     "renekton": "Renekton",
     "rengar": "Rengar",
     "riven": "Riven",
@@ -234,32 +237,15 @@ SLUG_TO_CANONICAL_ID = {
 }
 
 
-def clean_html(raw_html):
-    """Strip HTML tags and unescape entities into clean plain text."""
-    if not raw_html:
-        return ""
-    # Replace paragraph and line breaks with double newlines
-    text = re.sub(r"<\s*/?\s*p\s*>", "\n\n", raw_html, flags = re.IGNORECASE)
-    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags = re.IGNORECASE)
-    # Remove all other tags
-    text = re.sub(r"<[^>]+>", " ", text)
-    # Unescape HTML entities (&amp;, &quot;, &#39;, etc.)
-    text = html.unescape(text)
-    # Normalize multiple newlines and spaces
-    paragraphs = [re.sub(r"\s+", " ", p).strip() for p in text.split("\n") if p.strip()]
-    return "\n\n".join(paragraphs)
-
-
-
 def resolve_canonical_id(slug, name):
     """Resolve champion slug or name to canonical DDragon/system ID."""
     clean_slug = slug.lower().strip()
-    if clean_slug in SLUG_TO_CANONICAL_ID:
-        return SLUG_TO_CANONICAL_ID[clean_slug]
+    if clean_slug in slug_to_canonical_id:
+        return slug_to_canonical_id[clean_slug]
 
     clean_name = re.sub(r"[^a-zA-Z0-9]", "", name)
-    if clean_name.lower() in SLUG_TO_CANONICAL_ID:
-        return SLUG_TO_CANONICAL_ID[clean_name.lower()]
+    if clean_name.lower() in slug_to_canonical_id:
+        return slug_to_canonical_id[clean_name.lower()]
 
     # Fallback to sanitized capitalized name
     return clean_name or slug.capitalize()
@@ -269,9 +255,9 @@ def fetch_champion_universe(slug):
     """Fetch raw champion JSON from Riot Universe Meeps API."""
     url = build_universe_url("champion_detail", slug = slug)
     try:
-        return fetch_json(url, tag = TAG, retries = 2, timeout = 12)
+        return fetch_json(url, tag = tag, retries = 2, timeout = 12)
     except Exception as e:
-        log(TAG, f"Failed to fetch Universe detail for slug '{slug}': {e}")
+        log(tag, f"Failed to fetch Universe detail for slug '{slug}': {e}")
         return None
 
 
@@ -280,26 +266,26 @@ def collect_lore():
     Fetch comprehensive English lore, biographies, regions, and relationships
     for all champions from Riot Universe API.
     """
-    log(TAG, "Fetching champion browse index from Riot Universe (English)...")
+    log(tag, "Fetching champion browse index from Riot Universe (English)...")
     browse_url = build_universe_url("champion_browse")
-    browse_data = fetch_json(browse_url, tag = TAG, retries = 3, timeout = 15)
+    browse_data = fetch_json(browse_url, tag = tag, retries = 3, timeout = 15)
 
     if not browse_data or "champions" not in browse_data:
-        log(TAG, "ERROR: Could not fetch champion browse index from Riot Universe!")
+        log(tag, "ERROR: Could not fetch champion browse index from Riot Universe!")
         return {}
 
 
     champions_meta = browse_data.get("champions", [])
-    log(TAG, f"Discovered {len(champions_meta)} champions on Riot Universe.")
+    log(tag, f"Discovered {len(champions_meta)} champions on Riot Universe.")
 
-    universe_raw_dir = LORE_RAW_DIR / "universe"
+    universe_raw_dir = LORE_raw_dir / "universe"
     universe_raw_dir.mkdir(parents = True, exist_ok = True)
 
 
     consolidated_lore = {}
 
     # Fetch details concurrently for high throughput
-    log(TAG, "Downloading complete Universe lore and relationships...")
+    log(tag, "Downloading complete Universe lore and relationships...")
     slug_list = [c.get("slug") for c in champions_meta if c.get("slug")]
 
     results_by_slug = {}
@@ -317,9 +303,9 @@ def collect_lore():
                     # Save individual raw JSON
                     save_json(data, universe_raw_dir / f"{slug}.json")
             except Exception as e:
-                log(TAG, f"Error processing {slug}: {e}")
+                log(tag, f"Error processing {slug}: {e}")
 
-    log(TAG, f"Successfully downloaded detail payloads for {len(results_by_slug)} champions.")
+    log(tag, f"Successfully downloaded detail payloads for {len(results_by_slug)} champions.")
 
     # Process and build structured lore entries
     for champ_meta in champions_meta:
@@ -344,7 +330,7 @@ def collect_lore():
         short_lore = clean_html(raw_short_bio)
 
         faction_slug = champ_obj.get("associated-faction-slug") or default_faction_slug or "unaffiliated"
-        faction_name = FACTION_MAP.get(faction_slug.lower(), faction_slug.replace("-", " ").title())
+        faction_name = faction_map.get(faction_slug.lower(), faction_slug.replace("-", " ").title())
 
         # Extract related champions
         related_list = detail_data.get("related-champions", []) if isinstance(detail_data, dict) else []
@@ -374,9 +360,9 @@ def collect_lore():
         }
 
     # Save final consolidated lore JSON
-    output_file = LORE_RAW_DIR / "lore.json"
+    output_file = LORE_raw_dir / "lore.json"
     save_json(consolidated_lore, output_file)
-    log(TAG, f"Saved full English Universe lore for {len(consolidated_lore)} champions to {output_file}")
+    log(tag, f"Saved full English Universe lore for {len(consolidated_lore)} champions to {output_file}")
 
     return consolidated_lore
 
