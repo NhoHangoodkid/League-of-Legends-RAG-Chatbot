@@ -21,18 +21,18 @@ from pathlib import Path
 import torch
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 
 # Default paths
-PROJECT_ROOT = SRC_DIR.parent
-PROCESSED_DIR = SRC_DIR / "processors" / "processed"
-TRAINING_DATA_DIR = SRC_DIR / "training"
-LORA_OUTPUT_DIR = SRC_DIR / "training" / "lora_model"
+project_root = src_dir.parent
+processed_dir = src_dir / "processors" / "processed"
+training_data_dir = src_dir / "training"
+lora_output_dir = src_dir / "training" / "lora_model"
 
-DEFAULT_BASE_MODEL = "BAAI/bge-small-en-v1.5"
+default_base_model = "BAAI/bge-small-en-v1.5"
 
 
 def resolve_data_path(path_str):
@@ -42,7 +42,7 @@ def resolve_data_path(path_str):
     p = Path(path_str)
     if p.is_absolute() and p.exists():
         return p
-    for base in [Path.cwd(), PROJECT_ROOT, SRC_DIR, TRAINING_DATA_DIR]:
+    for base in [Path.cwd(), project_root, src_dir, training_data_dir]:
         cand = base / path_str
         if cand.exists():
             return cand
@@ -65,7 +65,7 @@ class LoRAEmbeddingTrainer:
     - Gradient checkpointing if needed
     """
 
-    def __init__(self, base_model = DEFAULT_BASE_MODEL, lora_rank = 8, lora_alpha = 16, lora_dropout = 0.1, target_modules = None):
+    def __init__(self, base_model = default_base_model, lora_rank = 8, lora_alpha = 16, lora_dropout = 0.1, target_modules = None):
         self.base_model = base_model
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
@@ -79,7 +79,7 @@ class LoRAEmbeddingTrainer:
             vram = torch.cuda.get_device_properties(0).total_memory / 1e9
             print(f"[LoRATrainer] GPU: {gpu_name} ({vram:.1f} GB VRAM)")
 
-    def train(self, training_data_path = str(TRAINING_DATA_DIR / "train.jsonl"), val_data_path = str(TRAINING_DATA_DIR / "val.jsonl"), output_dir = str(LORA_OUTPUT_DIR), epochs = 3, batch_size = 32, learning_rate = 2e-4, warmup_ratio = 0.1, eval_split = 0.1, fp16 = True, evaluation_steps = 100):
+    def train(self, training_data_path = str(training_data_dir / "train.jsonl"), val_data_path = str(training_data_dir / "val.jsonl"), output_dir = str(lora_output_dir), epochs = 3, batch_size = 32, learning_rate = 2e-4, warmup_ratio = 0.1, eval_split = 0.1, fp16 = True, evaluation_steps = None, evals_per_epoch = 2, no_eval = False):
         """
         Train LoRA adapter on domain-specific triplets.
 
@@ -93,7 +93,9 @@ class LoRAEmbeddingTrainer:
             warmup_ratio: Proportion of warmup steps.
             eval_split: Fraction of data for evaluation if val_data_path is not available.
             fp16: Use mixed precision training.
-            evaluation_steps: Evaluate on validation set every N training steps.
+            evaluation_steps: Fixed evaluation step interval (overrides evals_per_epoch if set > 0).
+            evals_per_epoch: Number of evaluations per epoch (default: 2 to save time).
+            no_eval: If True, completely disable validation during training for max speed.
         """
         from sentence_transformers import (
             SentenceTransformer,
@@ -105,13 +107,11 @@ class LoRAEmbeddingTrainer:
         from torch.utils.data import DataLoader, Dataset
 
         start = time.time()
-        print("-" * 60)
         print("LoRA FINE-TUNING — Starting")
         print(f"  Base model: {self.base_model}")
         print(f"  LoRA rank: {self.lora_rank}, alpha: {self.lora_alpha}")
         print(f"  Target modules: {self.target_modules}")
         print(f"  Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
-        print("-" * 60)
 
         # 1. Load training data
         print("\n[1/4] Loading training data...")
@@ -173,9 +173,24 @@ class LoRAEmbeddingTrainer:
             batch_size = batch_size,
         )
 
+        steps_per_epoch = len(train_dataloader)
+        total_steps = steps_per_epoch * epochs
+        warmup_steps = int(total_steps * warmup_ratio)
+
+        # Calculate evaluation steps: eval 2 times per epoch by default to save time
+        if evaluation_steps is not None and evaluation_steps > 0:
+            fit_eval_steps = evaluation_steps
+            eval_timing_desc = f"every {fit_eval_steps} steps"
+        elif evals_per_epoch and evals_per_epoch > 0:
+            fit_eval_steps = max(1, steps_per_epoch // evals_per_epoch)
+            eval_timing_desc = f"{evals_per_epoch} times per epoch (~every {fit_eval_steps} steps, steps_per_epoch={steps_per_epoch})"
+        else:
+            fit_eval_steps = 0
+            eval_timing_desc = "epoch ends only"
+
         # Evaluator: TripletEvaluator using zero-leakage validation triplets
         evaluator = None
-        if eval_triplets:
+        if eval_triplets and not no_eval:
             eval_queries = [t["query"] for t in eval_triplets]
             eval_positives = [t["positive"] for t in eval_triplets]
             eval_negatives = [t["negative"] for t in eval_triplets]
@@ -186,16 +201,14 @@ class LoRAEmbeddingTrainer:
                 name = "val_zero_leakage",
                 show_progress_bar = False,
             )
-            print(f"  Validation evaluator active: {len(eval_triplets)} samples (eval every {evaluation_steps} steps)")
-
-        # Training loop using sentence-transformers fit()
-        total_steps = len(train_dataloader) * epochs
-        warmup_steps = int(total_steps * warmup_ratio)
+            print(f"  Validation evaluator active: {len(eval_triplets)} samples ({eval_timing_desc})")
+        else:
+            print("  Validation evaluator: DISABLED (Fast training mode — no evaluation overhead)")
 
         model.fit(
             train_objectives = [(train_dataloader, train_loss)],
             evaluator = evaluator,
-            evaluation_steps = evaluation_steps if evaluator else None,
+            evaluation_steps = fit_eval_steps,
             epochs = epochs,
             warmup_steps = warmup_steps,
             optimizer_params={"lr": learning_rate},
@@ -221,7 +234,8 @@ class LoRAEmbeddingTrainer:
             "epochs": epochs,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
-            "evaluation_steps": evaluation_steps,
+            "evaluation_steps": fit_eval_steps,
+            "evals_per_epoch": evals_per_epoch,
             "train_samples": len(train_triplets),
             "eval_samples": len(eval_triplets),
             "device": self.device,
@@ -230,11 +244,9 @@ class LoRAEmbeddingTrainer:
             json.dump(config, f, indent = 2)
 
         elapsed = time.time() - start
-        print("\n" + "-" * 60)
         print(f"LoRA FINE-TUNING COMPLETED in {elapsed:.1f}s")
         print(f"  Adapter saved to: {output_dir}")
         print(f"  Adapter size: ~{self.get_dir_size(output_dir):.1f} MB")
-        print("-" * 60)
 
 
     @staticmethod
@@ -242,19 +254,28 @@ class LoRAEmbeddingTrainer:
         """Load triplets from JSONL file."""
         target_path = resolve_data_path(path)
         if not target_path or not target_path.exists():
-            fallback = TRAINING_DATA_DIR / "train.jsonl"
+            fallback = training_data_dir / "train.jsonl"
             if fallback.exists():
                 target_path = fallback
 
         if not target_path or not target_path.exists():
-            raise FileNotFoundError(f"Training triplets file not found at {path} or fallback location: {TRAINING_DATA_DIR / 'train.jsonl'}")
+            raise FileNotFoundError(f"Training triplets file not found at {path} or fallback location: {training_data_dir / 'train.jsonl'}")
 
         triplets = []
         with open(target_path, "r", encoding = "utf-8") as f:
-            for line in f:
+            for line_idx, line in enumerate(f):
                 line = line.strip()
                 if line:
-                    triplets.append(json.loads(line))
+                    item = json.loads(line)
+                    if "messages" in item:
+                        raise ValueError(
+                            f"File '{target_path.name}' is an SFT dataset (ChatML format for Qwen 8B LLM), "
+                            f"not an embedding triplet dataset. lora_trainer.py trains BGE embedding with triplets "
+                            f"('query', 'positive', 'negative').\n"
+                            f"-> To generate triplet data for lora_trainer, run:\n"
+                            f"   python -m src.training.data_generator --mode triplet --source mongo\n"
+                        )
+                    triplets.append(item)
         return triplets
 
     @staticmethod
@@ -271,7 +292,7 @@ class LoRAEmbeddingTrainer:
 
 def main():
     parser = argparse.ArgumentParser(description = "LoRA fine-tune embedding model for LoL domain")
-    parser.add_argument("--config", type = str, default = str(SRC_DIR / "training" / "train.yaml"), help = "Path to train.yaml config")
+    parser.add_argument("--config", type = str, default = str(src_dir / "training" / "train.yaml"), help = "Path to train.yaml config")
     parser.add_argument("--base-model", type = str, default = None)
     parser.add_argument("--data", type = str, default = None)
     parser.add_argument("--val-data", type = str, default = None)
@@ -281,13 +302,15 @@ def main():
     parser.add_argument("--lr", type = float, default = None)
     parser.add_argument("--rank", type = int, default = None)
     parser.add_argument("--alpha", type = int, default = None)
-    parser.add_argument("--eval-steps", type = int, default = None)
+    parser.add_argument("--eval-steps", type = int, default = None, help = "Evaluate every N steps (0 = end of epoch only, overrides evals-per-epoch)")
+    parser.add_argument("--evals-per-epoch", type = int, default = None, help = "Number of evaluations per epoch (default: 2)")
+    parser.add_argument("--no-eval", action = "store_true", help = "Disable evaluation completely during training for maximum speed")
 
     args = parser.parse_args()
 
     # Load YAML config if present
     cfg = {}
-    config_path = resolve_data_path(args.config) if args.config else SRC_DIR / "training" / "train.yaml"
+    config_path = resolve_data_path(args.config) if args.config else src_dir / "training" / "train.yaml"
     if config_path and config_path.exists():
         import yaml
         print(f"[LoRATrainer] Loading configuration from {config_path}")
@@ -299,10 +322,10 @@ def main():
     train_cfg = cfg.get("training", {})
     paths_cfg = cfg.get("paths", {})
 
-    base_model = args.base_model or model_cfg.get("base_model", DEFAULT_BASE_MODEL)
-    data_path = args.data or paths_cfg.get("training_data", str(TRAINING_DATA_DIR / "train.jsonl"))
-    val_path = args.val_data or paths_cfg.get("val_data", str(TRAINING_DATA_DIR / "val.jsonl"))
-    output_dir = args.output or paths_cfg.get("output_dir", str(LORA_OUTPUT_DIR))
+    base_model = args.base_model or model_cfg.get("base_model", default_base_model)
+    data_path = args.data or paths_cfg.get("training_data", str(training_data_dir / "train.jsonl"))
+    val_path = args.val_data or paths_cfg.get("val_data", str(training_data_dir / "val.jsonl"))
+    output_dir = args.output or paths_cfg.get("output_dir", str(lora_output_dir))
     epochs = args.epochs or train_cfg.get("epochs", 3)
     batch_size = args.batch_size or train_cfg.get("batch_size", 32)
     lr = args.lr or train_cfg.get("learning_rate", 2e-4)
@@ -310,7 +333,8 @@ def main():
     alpha = args.alpha or lora_cfg.get("lora_alpha", 16)
     dropout = lora_cfg.get("lora_dropout", 0.1)
     target_modules = lora_cfg.get("target_modules", ["query", "key", "value"])
-    eval_steps = args.eval_steps or train_cfg.get("evaluation_steps", 100)
+    eval_steps = args.eval_steps if args.eval_steps is not None else train_cfg.get("evaluation_steps", None)
+    evals_per_epoch = args.evals_per_epoch if args.evals_per_epoch is not None else train_cfg.get("evals_per_epoch", 2)
 
     trainer = LoRAEmbeddingTrainer(
         base_model = base_model,
@@ -330,6 +354,8 @@ def main():
         eval_split = train_cfg.get("eval_split", 0.1),
         fp16 = train_cfg.get("fp16", True),
         evaluation_steps = eval_steps,
+        evals_per_epoch = evals_per_epoch,
+        no_eval = args.no_eval,
     )
 
 

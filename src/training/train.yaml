@@ -25,7 +25,8 @@ training:
   eval_split: 0.1
   fp16: true                # Mixed precision for GPU acceleration
   loss: "MultipleNegativesRankingLoss"
-  evaluation_steps: 100
+  evals_per_epoch: 2        # Evaluate 2 times per epoch to save training time
+  # evaluation_steps: null  # Optional: fixed step interval (overrides evals_per_epoch)
   save_total_limit: 2
 
 paths:
@@ -36,7 +37,7 @@ paths:
   checkpoints_dir: "src/training/checkpoints"
 
 data_generation:
-  target_count: 10000
+  target_count: 5000
   train_ratio: 0.8
   val_ratio: 0.1
   test_ratio: 0.1
