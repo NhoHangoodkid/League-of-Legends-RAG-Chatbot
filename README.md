@@ -35,8 +35,8 @@ Ensure you have the following minimum versions installed and running:
 ### 2. Installation & Environment
 ```bash
 # Clone & install dependencies
-git clone https://github.com/your-username/Learning-English-ChatBot.git
-cd "Learning-English-ChatBot"
+git clone https://github.com/NhoHangoodkid/League-of-Legends-RAG-Chatbot.git
+cd "League-of-Legends-RAG-Chatbot"
 python -m venv venv
 .\venv\Scripts\activate   # Linux/macOS: source venv/bin/activate
 pip install -r requirements.txt
