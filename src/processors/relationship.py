@@ -1,5 +1,5 @@
 """
-Relationship & Knowledge Base Generator.
+Relationship and Knowledge Base Generator.
 
 Generates structured relationship and matchup data for LoL Knowledge Bot:
 - Counters: Matchup advantage/disadvantage with win rates and tactical reasons
@@ -12,9 +12,9 @@ import shutil
 from pathlib import Path
 
 from .utils import (
-    DDRAGON_RAW_DIR,
-    PROCESSED_DIR,
-    SRC_DIR,
+    DDRAGON_raw_dir,
+    processed_dir,
+    src_dir,
     ensure_dirs,
     load_json,
     log,
@@ -22,13 +22,13 @@ from .utils import (
 )
 
 # Default knowledge base storage directory
-KB_DIR = SRC_DIR / "data" / "knowledge_base"
+kb_dir = src_dir / "data" / "knowledge_base"
 
 
 # Automated Relationship Scoring Configuration
 
 # Starting items mapped by primary role
-STARTING_ITEMS_BY_ROLE = {
+starting_items_by_role = {
     "marksman": ["Doran's Blade", "Health Potion"],
     "fighter": ["Doran's Blade", "Health Potion"],
     "assassin": ["Long Sword", "Refillable Potion"],
@@ -38,7 +38,7 @@ STARTING_ITEMS_BY_ROLE = {
 }
 
 # Boots preference by archetype
-BOOTS_BY_PROFILE = {
+boots_by_profile = {
     "marksman": "Berserker's Greaves",
     "assassin_physical": "Ionian Boots of Lucidity",
     "assassin_magic": "Sorcerer's Shoes",
@@ -51,7 +51,7 @@ BOOTS_BY_PROFILE = {
 }
 
 # Summoner spells by primary position
-SUMMONER_SPELLS_BY_POSITION = {
+summoner_spells_by_position = {
     "BOT": ["Flash", "Heal"],
     "SUPPORT": ["Flash", "Ignite"],
     "MID": ["Flash", "Ignite"],
@@ -60,7 +60,7 @@ SUMMONER_SPELLS_BY_POSITION = {
 }
 
 # Keystone selection by archetype (role + subrole combination)
-KEYSTONE_BY_ARCHETYPE = {
+keystone_by_archetype = {
     "marksman": "Lethal Tempo",
     "assassin_physical": "Electrocute",
     "assassin_magic": "Electrocute",
@@ -80,10 +80,10 @@ KEYSTONE_BY_ARCHETYPE = {
 }
 
 # Preferred secondary runes per tree (slot > 0, ordered by general priority)
-RUNE_TREE_SECONDARY_PREFS = {
+rune_tree_secondary_prefs = {
     "Precision": ["Triumph", "Legend: Alacrity", "Coup de Grace", "Last Stand",
                    "Presence of Mind", "Legend: Bloodline", "Cut Down"],
-    "Domination": ["Taste of Blood", "Eyeball Collection", "Ultimate Hunter",
+    "Domination": ["Taste of Blood", "Grisly Mementos", "Ultimate Hunter",
                     "Treasure Hunter", "Sudden Impact"],
     "Sorcery": ["Manaflow Band", "Transcendence", "Scorch", "Gathering Storm",
                  "Absolute Focus", "Celerity"],
@@ -94,7 +94,7 @@ RUNE_TREE_SECONDARY_PREFS = {
 }
 
 # Preferred secondary tree pairing (primary → secondary)
-SECONDARY_TREE_PAIRING = {
+secondary_tree_pairing = {
     "Precision": "Resolve",
     "Domination": "Sorcery",
     "Sorcery": "Inspiration",
@@ -103,7 +103,7 @@ SECONDARY_TREE_PAIRING = {
 }
 
 # Item tag affinity weights per champion archetype
-ITEM_TAG_WEIGHTS = {
+item_tag_weights = {
     "marksman": {"CriticalStrike": 5, "AttackSpeed": 3, "Damage": 3, "LifeSteal": 2},
     "assassin_physical": {"Damage": 4, "ArmorPenetration": 4, "AbilityHaste": 2},
     "assassin_magic": {"SpellDamage": 4, "MagicPenetration": 4, "AbilityHaste": 2},
@@ -116,14 +116,13 @@ ITEM_TAG_WEIGHTS = {
 }
 
 # Position pairs eligible for synergy scoring
-SYNERGY_POSITION_PAIRS = {
+synergy_position_pairs = {
     "BOT": {"SUPPORT"},
     "SUPPORT": {"BOT"},
     "MID": {"JUNGLE", "SUPPORT"},
     "TOP": {"JUNGLE"},
     "JUNGLE": {"MID", "TOP", "BOT"},
 }
-
 
 
 class RelationshipGenerator:
@@ -135,8 +134,8 @@ class RelationshipGenerator:
     """
 
     def __init__(self, processed_dir = None, kb_dir = None):
-        self.processed_dir = processed_dir or PROCESSED_DIR
-        self.kb_dir = kb_dir or KB_DIR
+        self.processed_dir = processed_dir or processed_dir
+        self.kb_dir = kb_dir or kb_dir
         self.counters_dir = self.kb_dir / "counters"
         self.synergies_dir = self.kb_dir / "synergies"
         self.builds_dir = self.kb_dir / "builds"
@@ -148,7 +147,7 @@ class RelationshipGenerator:
         Generates in-memory relationship structures, embeds them into champions,
         extracts complete relational edges, and optionally persists to disk.
         """
-        print("[RelationshipGenerator] Generating knowledge base relationships & entity graph...")
+        print("[RelationshipGenerator] Generating knowledge base relationships and entity graph...")
 
         # Load data if not passed in-memory
         if not champions:
@@ -163,7 +162,7 @@ class RelationshipGenerator:
             runes = load_json(self.processed_dir / "runes.json")
 
         if save_to_disk:
-            self._ensure_output_dirs()
+            self.ensure_output_dirs()
             self.sync_core_files()
 
         # 1. Generate counters, synergies, and builds
@@ -220,7 +219,7 @@ class RelationshipGenerator:
             "stats": stats,
         }
 
-    def _ensure_output_dirs(self):
+    def ensure_output_dirs(self):
         """Ensure all knowledge base output subdirectories exist."""
         for d in [self.counters_dir, self.synergies_dir, self.builds_dir, self.champions_dir]:
             d.mkdir(parents=True, exist_ok=True)
@@ -238,7 +237,7 @@ class RelationshipGenerator:
             out_file = self.champions_dir / f"{cid}.json"
             save_json(data, out_file)
 
-    def generate_counters(self, champions, save_to_disk=False):
+    def generate_counters(self, champions, save_to_disk = False):
         """Generate counter matchups by scoring all champion pairs using heuristic analysis."""
         results = {}
         champ_list = list(champions.items())
@@ -256,7 +255,7 @@ class RelationshipGenerator:
                 other_name = other_champ.get("name", other_cid)
 
                 # Score: how well does other_champ counter champ?
-                c_score, c_reasons = self._score_counter_pair(champ, other_champ)
+                c_score, c_reasons = self.score_counter_pair(champ, other_champ)
                 if c_score > 0 and c_reasons:
                     weak_against.append({
                         "champion": other_name,
@@ -265,7 +264,7 @@ class RelationshipGenerator:
                     })
 
                 # Score: how well does champ counter other_champ?
-                f_score, f_reasons = self._score_counter_pair(other_champ, champ)
+                f_score, f_reasons = self.score_counter_pair(other_champ, champ)
                 if f_score > 0 and f_reasons:
                     strong_against.append({
                         "champion": other_name,
@@ -296,7 +295,7 @@ class RelationshipGenerator:
         return results
 
     @staticmethod
-    def _score_counter_pair(champ_a, champ_b):
+    def score_counter_pair(champ_a, champ_b):
         """
         Score how well champion B counters champion A.
         Higher score = B is a stronger counter to A.
@@ -320,8 +319,17 @@ class RelationshipGenerator:
 
         b_name = champ_b.get("name", "")
 
-        # Rule 1: Hard CC shuts down assassins/divers
-        if a_roles & {"assassin"} or a_subroles & {"DIVER", "SKIRMISHER", "ASSASSIN"}:
+        # Position overlap bonus — prioritize same-lane matchups
+        a_positions = set(champ_a.get("positions", []))
+        b_positions = set(champ_b.get("positions", []))
+        if a_positions & b_positions:
+            score += 3  # Significant bonus for same-lane counter
+
+        is_marksman_a = "marksman" in a_roles or "MARKSMAN" in a_subroles
+        has_true_damage_a = any("true" in eff.lower() for eff in champ_a.get("ability_effects", [])) or champ_a.get("name") in {"Vayne", "Fiora", "Gwen", "Master Yi"}
+
+        # Rule 1: Hard CC shuts down assassins/divers (excluding marksmen)
+        if (a_roles & {"assassin"} and not is_marksman_a) or (a_subroles & {"DIVER", "SKIRMISHER"} and not is_marksman_a):
             if b_hard_cc:
                 cc_str = ", ".join(sorted(b_hard_cc))
                 score += min(len(b_hard_cc) * 2, 4)
@@ -333,11 +341,16 @@ class RelationshipGenerator:
                 score += 3
                 reasons.append(f"{b_name}'s ranged attacks kite immobile melee from safe distance")
 
-        # Rule 3: Tank absorbs physical assassin burst
-        if "PHYSICAL" in a_adaptive and a_roles & {"assassin"}:
+        # Rule 3: Tank absorbs physical assassin burst (excluding marksmen and true-damage shredders)
+        if "PHYSICAL" in a_adaptive and (a_roles & {"assassin"}) and not is_marksman_a and not has_true_damage_a:
             if "tank" in b_roles or bool(b_subroles & {"VANGUARD", "WARDEN"}):
                 score += 3
                 reasons.append(f"{b_name}'s high armor and health pool absorbs physical burst")
+
+        # Penalty: Immobile tanks do NOT counter champions dealing true damage or dedicated tank shredders
+        if has_true_damage_a or (is_marksman_a and a_ratings.get("damage", 0) >= 2):
+            if "tank" in b_roles or bool(b_subroles & {"VANGUARD", "WARDEN"}):
+                score -= 4
 
         # Rule 4: Sustained DPS shreds tanks
         if "tank" in a_roles or bool(a_subroles & {"VANGUARD", "WARDEN", "JUGGERNAUT"}):
@@ -354,11 +367,11 @@ class RelationshipGenerator:
 
         # Rule 6: Targeted CC vs dash-reliant champions
         if "Dash" in a_effects or "Blink" in a_effects:
-            targeted_cc = b_hard_cc & {"Suppression", "Charm", "Taunt", "Polymorph"}
-            if targeted_cc:
+            disruptive_cc = b_hard_cc & {"Suppress", "Charm", "Taunt", "Polymorph"}
+            if disruptive_cc:
                 score += 2
-                cc_str = ", ".join(sorted(targeted_cc))
-                reasons.append(f"{b_name}'s targeted {cc_str} cannot be dodged by dashes")
+                cc_str = ", ".join(sorted(disruptive_cc))
+                reasons.append(f"{b_name}'s {cc_str} provides reliable lockdown against mobile champions")
 
         # Rule 7: Shield/defensive vs burst damage
         if a_ratings.get("damage", 0) >= 3:
@@ -372,17 +385,34 @@ class RelationshipGenerator:
                 score += 1
                 reasons.append(f"{b_name} can itemize Grievous Wounds to cripple healing sustain")
 
-        # Rule 9: Projectile blocking counters projectile-reliant mages
+        # Rule 9: Projectile blocking and dive counters vs ranged skillshot mages
         if "mage" in a_roles and a_attack == "RANGED":
-            if "Shield" in b_effects and ("Dash" in b_effects or "Blink" in b_effects):
-                if b_ratings.get("mobility", 0) >= 2:
-                    score += 2
-                    reasons.append(f"{b_name}'s high mobility and projectile defense neutralize skillshot mages")
+            if b_name in {"Yasuo", "Braum", "Samira"}:
+                score += 3
+                reasons.append(f"{b_name}'s projectile-blocking defense neutralizes skillshot mages")
+            elif "Shield" in b_effects and ("Dash" in b_effects or "Blink" in b_effects) and b_ratings.get("mobility", 0) >= 2:
+                score += 2
+                reasons.append(f"{b_name}'s gap-closing mobility and defensive shields allow them to dive and trade effectively against skillshot mages")
+
+        # Rule 10: Attack speed slows, blind, auto-attack evasion vs basic-attack marksmen
+        if is_marksman_a or (a_attack == "RANGED" and a_ratings.get("damage", 0) >= 2):
+            if b_name in {"Teemo", "Jax", "Shen", "Malphite", "Nasus"}:
+                score += 4
+                reasons.append(f"{b_name}'s attack speed slow, blind, or evasion cripples basic-attack reliant marksmen")
+            elif "Blind" in b_hard_cc:
+                score += 3
+                reasons.append(f"{b_name}'s blind prevents basic attack damage and on-hit proc application")
+
+        # Rule 11: Gap-closing burst divers/assassins punish fragile solo-lane marksmen
+        if is_marksman_a and bool({"TOP", "MID"} & a_positions):
+            if ("assassin" in b_roles or bool(b_subroles & {"DIVER", "SKIRMISHER", "ASSASSIN"})) and (b_ratings.get("mobility", 0) >= 2 or bool({"Dash", "Blink"} & b_effects)):
+                score += 3
+                reasons.append(f"{b_name}'s gap-closing all-in burst punishes fragile ranged solo-laners before they can kite")
 
         return score, reasons
 
 
-    def generate_synergies(self, champions, save_to_disk=False):
+    def generate_synergies(self, champions, save_to_disk = False):
         """Generate duo synergies by scoring position-compatible champion pairs."""
         results = {}
 
@@ -399,17 +429,23 @@ class RelationshipGenerator:
             # Find candidates from compatible positions
             candidate_cids = set()
             for pos in positions:
-                partner_positions = SYNERGY_POSITION_PAIRS.get(pos, set())
+                partner_positions = synergy_position_pairs.get(pos, set())
                 for partner_pos in partner_positions:
                     for other_cid, _ in position_index.get(partner_pos, []):
                         if other_cid != cid:
                             candidate_cids.add(other_cid)
 
-            # Score each candidate
+            # Score each candidate — SYMMETRIC: check both directions and take the better one
             scored = []
             for other_cid in candidate_cids:
                 other_champ = champions[other_cid]
-                syn_score, syn_reasons = self._score_synergy_pair(champ, other_champ)
+                score_ab, reasons_ab = self.score_synergy_pair(champ, other_champ)
+                score_ba, reasons_ba = self.score_synergy_pair(other_champ, champ)
+                # Take the better direction
+                if score_ba > score_ab:
+                    syn_score, syn_reasons = score_ba, reasons_ba
+                else:
+                    syn_score, syn_reasons = score_ab, reasons_ab
                 if syn_score > 0 and syn_reasons:
                     other_name = other_champ.get("name", other_cid)
                     scored.append({
@@ -437,7 +473,7 @@ class RelationshipGenerator:
         return results
 
     @staticmethod
-    def _score_synergy_pair(champ_a, champ_b):
+    def score_synergy_pair(champ_a, champ_b):
         """
         Score how well two champions synergize.
         Returns (score, reasons) where reasons reference actual ability data.
@@ -470,7 +506,10 @@ class RelationshipGenerator:
             for ab in b_abilities.values():
                 if isinstance(ab, dict):
                     desc = (ab.get("description") or "").lower()
-                    if "airborne" in desc or "knocked up" in desc:
+                    # Only match abilities that REQUIRE airborne targets (e.g. Yasuo R, Yone R),
+                    # NOT abilities that CAUSE knockup (which mention "knocking enemies airborne")
+                    if ("airborne enemy" in desc or "airborne champion" in desc
+                            or "on airborne" in desc):
                         score += 4
                         reasons.append(f"Knockup enables {b_name}'s airborne-requiring abilities")
                         break
@@ -511,19 +550,19 @@ class RelationshipGenerator:
         return score, reasons
 
 
-    def generate_builds(self, champions, items=None, runes=None, save_to_disk=False):
+    def generate_builds(self, champions, items = None, runes = None, save_to_disk = False):
         """Generate recommended builds by scoring items against champion profiles."""
         results = {}
-        items_dict = items or {}
-        runes_dict = runes or {}
-        item_names = self._build_name_set(items_dict)
-        rune_names = self._build_name_set(runes_dict.get("byId", {}))
+        items_dict = items if items else load_json(self.processed_dir / "items.json") or {}
+        runes_dict = runes if runes else load_json(self.processed_dir / "runes.json") or {}
+        item_names = self.build_name_set(items_dict)
+        rune_names = self.build_name_set(runes_dict.get("byId", {}))
 
         for cid, champ in champions.items():
             name = champ.get("name", cid)
 
-            b_data = self._infer_build(name, cid, champ, items_dict, runes_dict)
-            b_data = self._filter_build_references(b_data, item_names, rune_names)
+            b_data = self.infer_build(name, cid, champ, items_dict, runes_dict)
+            b_data = self.filter_build_references(b_data, item_names, rune_names)
             results[cid] = b_data
 
             if save_to_disk:
@@ -576,6 +615,29 @@ class RelationshipGenerator:
 
         items_dict = items or {}
 
+        # Build name→ID lookup maps for resolving display names to canonical IDs
+        champ_name_to_id = {}
+        for _cid, _c in champions.items():
+            _cname = _c.get("name", _cid)
+            champ_name_to_id[_cname] = _cid
+            champ_name_to_id[_cid] = _cid
+            for _alias in _c.get("aliases", []):
+                if _alias not in champ_name_to_id:
+                    champ_name_to_id[_alias] = _cid
+
+        item_name_to_id = {}
+        for _iid, _idata in items_dict.items():
+            _iname = _idata.get("name", "") if isinstance(_idata, dict) else ""
+            if _iname:
+                item_name_to_id[_iname] = str(_iid)
+
+        rune_name_to_id = {}
+        _runes_by_id = (runes or {}).get("byId", {})
+        for _rid, _rdata in _runes_by_id.items():
+            _rname = _rdata.get("name", "") if isinstance(_rdata, dict) else ""
+            if _rname:
+                rune_name_to_id[_rname] = str(_rid)
+
         # 1. Champion relationships
         for cid, champ in champions.items():
             name = champ.get("name", cid)
@@ -610,6 +672,7 @@ class RelationshipGenerator:
             for rel_c in champ.get("related_champions", []):
                 rel_id = (rel_c.get("canonical_id") or rel_c.get("name")) if isinstance(rel_c, dict) else str(rel_c)
                 rel_name = rel_c.get("name", rel_id) if isinstance(rel_c, dict) else str(rel_c)
+                rel_id = champ_name_to_id.get(rel_id, champ_name_to_id.get(rel_name, rel_id))
                 add_rel(cid, name, "champion", rel_id, rel_name, "champion", "LORE_RELATED", {"region": champ.get("region")})
 
             # Counters
@@ -618,54 +681,106 @@ class RelationshipGenerator:
                 for weak in c_info.get("weakAgainst", []):
                     opp = weak.get("champion")
                     if opp:
-                        add_rel(cid, name, "champion", opp, opp, "champion", "WEAK_AGAINST", {
+                        opp_id = champ_name_to_id.get(opp, opp)
+                        add_rel(cid, name, "champion", opp_id, opp, "champion", "WEAK_AGAINST", {
                             "win_rate": weak.get("winRate"),
                             "reason": weak.get("reason", "")
                         })
                 for strong in c_info.get("strongAgainst", []):
                     opp = strong.get("champion")
                     if opp:
-                        add_rel(cid, name, "champion", opp, opp, "champion", "STRONG_AGAINST", {
+                        opp_id = champ_name_to_id.get(opp, opp)
+                        add_rel(cid, name, "champion", opp_id, opp, "champion", "STRONG_AGAINST", {
                             "win_rate": strong.get("winRate"),
                             "reason": strong.get("reason", "")
                         })
 
             # Synergies
-            s_info = (synergies or {}).get(cid, {})
-            syn_list = s_info.get("synergies", []) if isinstance(s_info, dict) else []
+            s_info = (synergies or {}).get(cid) or (synergies or {}).get(name) or {}
+            syn_list = s_info.get("best_duos") or s_info.get("synergies", []) if isinstance(s_info, dict) else []
             if not syn_list and isinstance(champ.get("synergies"), list):
                 syn_list = champ["synergies"]
             for syn in syn_list:
-                partner = syn.get("champion")
+                partner = syn.get("partner") or syn.get("champion")
                 if partner:
-                    add_rel(cid, name, "champion", partner, partner, "champion", "SYNERGIZES_WITH", {
-                        "duo_win_rate": syn.get("duo_win_rate"),
-                        "reason": syn.get("reason", "")
+                    partner_id = champ_name_to_id.get(partner, partner)
+                    add_rel(cid, name, "champion", partner_id, partner, "champion", "SYNERGIZES_WITH", {
+                        "duo_win_rate": syn.get("soloq_winrate") or syn.get("duo_win_rate"),
+                        "soloq_games": syn.get("soloq_games"),
+                        "pro_play": syn.get("pro_play", False),
+                        "pro_games": syn.get("pro_games", 0),
+                        "pro_winrate": syn.get("pro_winrate"),
+                        "reason": syn.get("synergy_reason") or syn.get("reason", ""),
+                        "synergy_tag": syn.get("synergy_tag", ""),
                     })
 
             # Builds
             b_info = (builds or {}).get(cid, champ.get("builds", {}))
             if isinstance(b_info, dict):
                 for item in b_info.get("startingItems", []):
-                    add_rel(cid, name, "champion", item, item, "item", "RECOMMENDS_ITEM", {"stage": "starting"})
+                    i_id = item_name_to_id.get(item, item)
+                    add_rel(cid, name, "champion", i_id, item, "item", "RECOMMENDS_ITEM", {"stage": "starting"})
                 for item in b_info.get("coreItems", []):
-                    add_rel(cid, name, "champion", item, item, "item", "RECOMMENDS_ITEM", {"stage": "core"})
+                    i_id = item_name_to_id.get(item, item)
+                    add_rel(cid, name, "champion", i_id, item, "item", "RECOMMENDS_ITEM", {"stage": "core"})
                 for item in b_info.get("fullBuild", []):
-                    add_rel(cid, name, "champion", item, item, "item", "RECOMMENDS_ITEM", {"stage": "fullBuild"})
+                    i_id = item_name_to_id.get(item, item)
+                    add_rel(cid, name, "champion", i_id, item, "item", "RECOMMENDS_ITEM", {"stage": "fullBuild"})
 
                 if b_info.get("keystone"):
                     ks = b_info["keystone"]
-                    add_rel(cid, name, "champion", ks, ks, "rune", "RECOMMENDS_RUNE", {"role": "keystone"})
+                    ks_id = rune_name_to_id.get(ks, ks)
+                    add_rel(cid, name, "champion", ks_id, ks, "rune", "RECOMMENDS_RUNE", {"role": "keystone"})
                 for r in b_info.get("primaryRunes", []):
-                    add_rel(cid, name, "champion", r, r, "rune", "RECOMMENDS_RUNE", {"role": "primary"})
+                    r_id = rune_name_to_id.get(r, r)
+                    add_rel(cid, name, "champion", r_id, r, "rune", "RECOMMENDS_RUNE", {"role": "primary"})
                 for r in b_info.get("secondaryRunes", []):
-                    add_rel(cid, name, "champion", r, r, "rune", "RECOMMENDS_RUNE", {"role": "secondary"})
+                    r_id = rune_name_to_id.get(r, r)
+                    add_rel(cid, name, "champion", r_id, r, "rune", "RECOMMENDS_RUNE", {"role": "secondary"})
                 for sp in b_info.get("summonerSpells", []):
                     add_rel(cid, name, "champion", sp, sp, "spell", "RECOMMENDS_SPELL")
+
+            # NEW: Damage type (from raw adaptiveType)
+            damage_type = champ.get("adaptiveType", "")
+            if damage_type:
+                add_rel(cid, name, "champion", damage_type, damage_type, "damage_type", "HAS_DAMAGE_TYPE")
+
+            # NEW: Attack type (Melee/Ranged)
+            attack_type = champ.get("attackType", "")
+            if attack_type:
+                add_rel(cid, name, "champion", attack_type, attack_type, "attack_type", "HAS_ATTACK_TYPE")
+
+            # NEW: Resource type (Mana/Energy/Fury/None...)
+            resource = champ.get("resource", "")
+            if resource:
+                add_rel(cid, name, "champion", resource, resource, "resource", "USES_RESOURCE")
+
+            # NEW: Playstyles (derived in Enricher from stats)
+            for ps in champ.get("playstyles", []):
+                add_rel(cid, name, "champion", ps, ps, "playstyle", "HAS_PLAYSTYLE")
+
+            # NEW: Win conditions (derived in Enricher)
+            for wc in champ.get("winConditions", []):
+                add_rel(cid, name, "champion", wc, wc, "win_condition", "HAS_WIN_CONDITION")
+
+            # NEW: Power curve (derived in Enricher)
+            power_curve = champ.get("powerCurve", "")
+            if power_curve:
+                add_rel(cid, name, "champion", power_curve, power_curve, "power_curve", "HAS_POWER_CURVE")
 
         # 2. Item build paths
         for iid, idata in items_dict.items():
             iname = idata.get("name", str(iid))
+
+            # NEW: Item stat edges (PROVIDES_STAT)
+            for stat_name, stat_val in idata.get("stats", {}).items():
+                if stat_val and stat_val != 0:
+                    add_rel(iid, iname, "item", stat_name, stat_name, "stat", "PROVIDES_STAT", {"value": stat_val})
+
+            # NEW: Item tag edges (HAS_TAG)
+            for tag in idata.get("tags", []):
+                add_rel(iid, iname, "item", tag, tag, "tag", "HAS_TAG")
+
             for target_id in idata.get("buildInto", idata.get("into", [])):
                 t_item = items_dict.get(str(target_id), {})
                 t_name = t_item.get("name", str(target_id))
@@ -687,7 +802,7 @@ class RelationshipGenerator:
         return relationships
 
     @staticmethod
-    def _build_name_set(entities):
+    def build_name_set(entities):
         """Return normalized display names from a processed entity dictionary."""
         return {
             data.get("name", "").lower()
@@ -696,7 +811,7 @@ class RelationshipGenerator:
         }
 
     @staticmethod
-    def _filter_build_references(build_data, item_names, rune_names):
+    def filter_build_references(build_data, item_names, rune_names):
         """Keep only items and runes that exist in the current processed dataset."""
         if item_names:
             for key in ["coreItems", "fullBuild", "startingItems"]:
@@ -704,6 +819,8 @@ class RelationshipGenerator:
                     name for name in build_data.get(key, [])
                     if name.lower() in item_names
                 ]
+            if build_data.get("boots", "").lower() not in item_names:
+                build_data["boots"] = ""
 
         if rune_names:
             for key in ["primaryRunes", "secondaryRunes"]:
@@ -717,11 +834,17 @@ class RelationshipGenerator:
         return build_data
 
     @staticmethod
-    def _get_champion_archetype(roles, subroles, adaptive):
-        """Determine the champion's build archetype key for item/rune scoring."""
+    def get_champion_archetype(roles, subroles, adaptive):
+        """Determine the champion's build archetype key for item/rune scoring.
+        Subrole-first classification ensures Juggernauts/Divers/Skirmishers
+        are correctly classified as fighters, not tanks."""
         is_physical = "PHYSICAL" in adaptive.upper()
-        roles_set = set(roles)
+        roles_set = set(r.lower() for r in roles)
         subroles_upper = set(s.upper() for s in subroles)
+
+        # Subrole-first: most specific classification wins
+        if subroles_upper & {"JUGGERNAUT", "DIVER", "SKIRMISHER"}:
+            return "fighter_physical" if is_physical else "fighter_magic"
 
         if "marksman" in roles_set:
             return "marksman"
@@ -729,10 +852,10 @@ class RelationshipGenerator:
             return "assassin_physical" if is_physical else "assassin_magic"
         elif "mage" in roles_set:
             return "mage"
-        elif "tank" in roles_set:
-            return "tank"
         elif "fighter" in roles_set:
             return "fighter_physical" if is_physical else "fighter_magic"
+        elif "tank" in roles_set:
+            return "tank"
         elif "support" in roles_set:
             if "ENCHANTER" in subroles_upper:
                 return "support_enchanter"
@@ -740,35 +863,40 @@ class RelationshipGenerator:
         return "fighter_physical"
 
     @staticmethod
-    def _score_item_for_champion(item_data, archetype_key):
+    def score_item_for_champion(item_data, archetype_key):
         """Score how well an item fits a champion's archetype. Higher = better fit."""
         tags = set(item_data.get("tags", []))
         stats = item_data.get("stats", {})
 
         # Get tag weights for this archetype
-        tag_weights = ITEM_TAG_WEIGHTS.get(archetype_key, {})
+        tag_weights = item_tag_weights.get(archetype_key, {})
 
         score = 0
         for tag, weight in tag_weights.items():
             if tag in tags:
                 score += weight
 
-        # Bonus from item stat values
+        # Bonus from item stat values (keys match processed items.json format)
         if archetype_key in ("marksman", "assassin_physical", "fighter_physical"):
-            score += min(stats.get("flat_attack_damage", 0) * 0.05, 3)
-            score += min(stats.get("percent_attack_speed", 0) * 3, 2)
+            score += min(stats.get("attack_damage", 0) * 0.05, 3)
+            score += min(stats.get("attack_speed", 0) * 3, 2)
         elif archetype_key in ("mage", "assassin_magic", "support_enchanter", "fighter_magic"):
-            score += min(stats.get("flat_ability_power", 0) * 0.05, 3)
+            score += min(stats.get("ability_power", 0) * 0.05, 3)
         elif archetype_key in ("tank", "support_tank"):
-            score += min(stats.get("flat_health", 0) * 0.005, 3)
-            score += min(stats.get("flat_armor", 0) * 0.05, 2)
+            score += min(stats.get("health", 0) * 0.005, 3)
+            score += min(stats.get("armor", 0) * 0.05, 2)
 
         return score
 
     @staticmethod
-    def _select_runes(archetype_key, subroles, runes_dict):
-        """Select keystone and rune page based on champion archetype."""
+    def select_runes(archetype_key, subroles, runes_dict, resource = "MANA"):
+        """Select keystone and rune page based on champion archetype.
+        Filters out mana-dependent runes for non-mana champions (Energy, Fury, etc.)."""
         subroles_upper = set(s.upper() for s in subroles)
+
+        # Runes that are useless for non-mana champions
+        mana_runes = {"Manaflow Band", "Presence of Mind"}
+        uses_mana = resource.upper() in ("MANA", "")
 
         # Determine archetype-specific rune key
         rune_key = archetype_key
@@ -801,7 +929,7 @@ class RelationshipGenerator:
             else:
                 rune_key = "mage_default"
 
-        keystone_name = KEYSTONE_BY_ARCHETYPE.get(rune_key, "Conqueror")
+        keystone_name = keystone_by_archetype.get(rune_key, "Conqueror")
 
         # Find keystone's tree from runes data
         by_id = runes_dict.get("byId", {})
@@ -811,23 +939,27 @@ class RelationshipGenerator:
                 keystone_tree = rdata.get("tree")
                 break
 
-        # Pick primary runes from keystone's tree
+        # Pick primary runes from keystone's tree (filter mana runes for non-mana champs)
         primary_runes = []
         if keystone_tree:
-            tree_runes = RUNE_TREE_SECONDARY_PREFS.get(keystone_tree, [])
+            tree_runes = rune_tree_secondary_prefs.get(keystone_tree, [])
+            if not uses_mana:
+                tree_runes = [r for r in tree_runes if r not in mana_runes]
             primary_runes = tree_runes[:3]
 
-        # Pick secondary runes from complementary tree
+        # Pick secondary runes from complementary tree (filter mana runes for non-mana champs)
         secondary_runes = []
         if keystone_tree:
-            sec_tree = SECONDARY_TREE_PAIRING.get(keystone_tree, "Inspiration")
-            sec_runes = RUNE_TREE_SECONDARY_PREFS.get(sec_tree, [])
+            sec_tree = secondary_tree_pairing.get(keystone_tree, "Inspiration")
+            sec_runes = rune_tree_secondary_prefs.get(sec_tree, [])
+            if not uses_mana:
+                sec_runes = [r for r in sec_runes if r not in mana_runes]
             secondary_runes = sec_runes[:2]
 
         return keystone_name, primary_runes, secondary_runes
 
     @staticmethod
-    def _infer_build(name, cid, champ, items_dict, runes_dict):
+    def infer_build(name, cid, champ, items_dict, runes_dict):
         """
         Generate build recommendations by scoring items against champion profile.
         Uses item stats/tags alignment and rune archetype matching.
@@ -838,7 +970,7 @@ class RelationshipGenerator:
         adaptive = champ.get("adaptiveType", "PHYSICAL_DAMAGE")
         positions = champ.get("positions", [])
 
-        archetype = RelationshipGenerator._get_champion_archetype(roles, subroles, adaptive)
+        archetype = RelationshipGenerator.get_champion_archetype(roles, subroles, adaptive)
 
         # Item Selection via Scoring
         completed_items = []
@@ -861,13 +993,13 @@ class RelationshipGenerator:
             # Separate boots
             if "Boots" in item_tags:
                 if has_from and not has_into and cost >= 900:
-                    boot_score = RelationshipGenerator._score_item_for_champion(idata, archetype)
+                    boot_score = RelationshipGenerator.score_item_for_champion(idata, archetype)
                     boot_items.append((idata, boot_score))
                 continue
 
             # Completed items: have components, no further upgrades, cost >= 2500
             if has_from and not has_into and cost >= 2500:
-                item_score = RelationshipGenerator._score_item_for_champion(idata, archetype)
+                item_score = RelationshipGenerator.score_item_for_champion(idata, archetype)
                 completed_items.append((idata, item_score))
 
         # Sort by score and pick top items
@@ -877,32 +1009,42 @@ class RelationshipGenerator:
         top_items = [item["name"] for item, _ in completed_items[:5]]
         core_items = [item["name"] for item, _ in completed_items[:3]]
 
-        # Pick boots
-        best_boots = BOOTS_BY_PROFILE.get(archetype, "Plated Steelcaps")
-        if boot_items:
+        # Pick canonical boots by archetype profile (avoids non-standard mode boots)
+        standard_boots = boots_by_profile.get(archetype, "Plated Steelcaps")
+        item_names_lookup = {it.get("name"): it for it in items_dict.values() if isinstance(it, dict) and it.get("name")}
+        if standard_boots in item_names_lookup:
+            best_boots = standard_boots
+        elif boot_items:
             best_boots = boot_items[0][0]["name"]
+        else:
+            best_boots = standard_boots
 
         full_build = top_items[:5]
         if best_boots not in full_build:
             full_build.append(best_boots)
         full_build = full_build[:6]
 
-        # Starting Items
-        primary_role = roles[0] if roles else "fighter"
-        starting = list(STARTING_ITEMS_BY_ROLE.get(primary_role, ["Doran's Blade", "Health Potion"]))
+        # Starting Items — prioritize position over role for junglers
+        primary_pos = positions[0] if positions else "MID"
+        if primary_pos == "JUNGLE":
+            starting = ["Gustwalker Hatchling", "Health Potion"]
+        else:
+            primary_role = roles[0] if roles else "fighter"
+            starting = list(starting_items_by_role.get(primary_role, ["Doran's Blade", "Health Potion"]))
 
         # Summoner Spells
-        primary_pos = positions[0] if positions else "MID"
-        spells = list(SUMMONER_SPELLS_BY_POSITION.get(primary_pos, ["Flash", "Ignite"]))
+        spells = list(summoner_spells_by_position.get(primary_pos, ["Flash", "Ignite"]))
 
-        # Runes
-        keystone, primary_runes, secondary_runes = RelationshipGenerator._select_runes(
-            archetype, subroles, runes_dict
+        # Runes — pass resource type to filter mana runes for non-mana champions
+        resource = champ.get("resource", "MANA") or "MANA"
+        keystone, primary_runes, secondary_runes = RelationshipGenerator.select_runes(
+            archetype, subroles, runes_dict, resource=resource
         )
 
         return {
             "champion": name,
             "champion_id": cid,
+            "boots": best_boots,
             "coreItems": core_items,
             "fullBuild": full_build,
             "startingItems": starting,
@@ -919,7 +1061,7 @@ class RelationshipGenerator:
 
 
 # Alias for backward compatibility
-Relationship = RelationshipGenerator
+relationship = RelationshipGenerator
 
 
 def build_knowledge_base(processed_dir = None, kb_dir = None):

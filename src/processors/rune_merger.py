@@ -10,17 +10,17 @@ Output: src/processors/processed/runes.json
 import json
 from pathlib import Path
 
-from .utils import DDRAGON_RAW_DIR, PROCESSED_DIR, load_json, save_json, log, clean_html
+from .utils import DDRAGON_raw_dir, processed_dir, load_json, save_json, log, clean_html
 
 
 class RuneMerger:
     """Process and clean pure raw rune data from DDragon."""
 
-    def merge(self):
+    def merge(self, save_to_disk = False):
         """Load and process raw rune data."""
         print("[RuneMerger] Loading raw rune data...")
 
-        raw_runes = self.load_json(DDRAGON_RAW_DIR / "runes.json")
+        raw_runes = self.load_json(DDRAGON_raw_dir / "runes.json")
         if not raw_runes:
             print("[RuneMerger] ERROR: No rune data found!")
             return {}
@@ -73,13 +73,16 @@ class RuneMerger:
             "byTree": runes_by_tree,
         }
 
-        self.save(result)
-        print(f"[RuneMerger] Saved {len(runes_flat)} runes in {len(runes_by_tree)} trees")
+        if save_to_disk:
+            self.save(result)
+            print(f"[RuneMerger] Saved {len(runes_flat)} runes in {len(runes_by_tree)} trees to disk")
+        else:
+            print(f"[RuneMerger] Merged {len(runes_flat)} runes in {len(runes_by_tree)} trees in-memory")
         return result
 
     def save(self, data):
         """Save processed data."""
-        return save_json(data, PROCESSED_DIR / "runes.json")
+        return save_json(data, processed_dir / "runes.json")
 
     @staticmethod
     def load_json(path):

@@ -14,37 +14,36 @@ import json
 import re
 from pathlib import Path
 
-from .utils import PROCESSED_DIR, load_json, save_json, log, clean_html
+from .utils import processed_dir, load_json, save_json, log, clean_html
 
 
 # CC Keywords — tightened to reduce false positives
-CC_KEYWORDS = {
+cc_keywords = {
     "Stun": [r"\bstuns?\b", r"\bstunned\b", r"\bstunning\b"],
     "Slow": [r"\bslows?\b", r"\bslowed\b", r"\bslowing\b"],
     "Root": [r"\broots?\b", r"\brooted\b", r"\brooting\b", r"\bimmobilize[sd]?\b", r"\bsnare[sd]?\b"],
     "Knockup": [r"\bknock(?:s|ed|ing)?\s*up\b", r"\bairborne\b", r"\bknock(?:s|ed)?\s*back\b", r"\bknockback\b"],
     "Silence": [r"\bsilence[sd]?\b", r"\bsilencing\b"],
-    "Blind": [r"\bblinds?\b", r"\bblinded\b", r"\bblinding\b", r"\bnearsight(?:ed)?\b"],
+    "Blind": [r"\bblinds?\b", r"\bblinded\b", r"\bblinding(?!\s+speed)\b", r"\bnearsight(?:ed)?\b"],
     "Charm": [r"\bcharms?\b", r"\bcharmed\b", r"\bcharming\b"],
-    "Fear": [r"\bfears?\b", r"\bfeared\b", r"\bfearing\b", r"\bflee(?:ing|s)?\b", r"\bterrif(?:y|ied|ies)\b"],
+    "Fear": [r"(?<!their\s)\bfears?\b", r"\bfeared\b", r"\bfearing\b", r"\bflee(?:ing|s)?\b", r"\bterrif(?:y|ied|ies)\b"],
     "Taunt": [r"\btaunts?\b", r"\btaunted\b", r"\btaunting\b"],
     "Suppress": [r"\bsuppress(?:es|ed|ing|ion)?\b"],
-    "Knockdown": [r"\bknock(?:s|ed|ing)?\s*down\b", r"\bground(?:s|ed|ing)?\b"],
+    "Knockdown": [r"\bknock(?:s|ed|ing)?\s*down\b", r"\bgrounded\s+enemies\b", r"\bground(?:s|ing)\b(?:\s+and\s+\w+)?\s+enemies\b"],
     "Sleep": [r"\bsleep(?:s|ing)?\b", r"\bdrowsy\b", r"\basleep\b"],
     "Polymorph": [r"\bpolymorph(?:s|ed)?\b"],
-    "Stasis": [r"\bstasis\b"],
 }
 
-# Hard CC: interrupts channels and prevents all actions
-HARD_CC_TYPES = {"Stun", "Knockup", "Suppress", "Charm", "Fear", "Taunt", "Sleep", "Stasis", "Polymorph"}
+# Hard CC: interrupts channels and prevents all actions (offensive crowd control on enemies)
+hard_cc_types = {"Stun", "Knockup", "Suppress", "Charm", "Fear", "Taunt", "Sleep", "Polymorph"}
 # Soft CC: limits actions but doesn't fully disable
-SOFT_CC_TYPES = {"Slow", "Root", "Silence", "Blind", "Knockdown"}
+soft_cc_types = {"Slow", "Root", "Silence", "Blind", "Knockdown"}
 
 
 # Effect Keywords — tightened to reduce false positives
 
-EFFECT_KEYWORDS = {
-    "Dash": [r"\bdash(?:es|ing)?\b", r"\bleap(?:s|ing)?\b", r"\bjump(?:s|ing)?\b", r"\blunge(?:s|ing)?\b"],
+effect_keywords = {
+    "Dash": [r"\bdash(?:es|ing)?\b", r"\bleap(?:s|ing)?(?!\s+to\s+(?:an?\s+)?enemy)\b", r"\bjump(?:s|ing)?(?!\s+to\s+(?:an?\s+)?enemy)\b", r"\blunge(?:s|ing)?\b"],
     "Blink": [r"\bblink(?:s|ing)?\b", r"\bteleport(?:s|ing)?\b"],
     "Shield": [r"\bshield(?:s|ing|ed)?\b", r"\bbarrier\b"],
     # Fixed: only match actual healing, not "restores mana" or "restores energy"
@@ -55,8 +54,12 @@ EFFECT_KEYWORDS = {
     "Revive": [r"\brevive[sd]?\b", r"\bresurrect(?:s|ed|ion)?\b"],
     "Clone": [r"\bclone(?:s|d)?\b", r"\bdecoy(?:s)?\b"],
     "Pull": [r"\bpull(?:s|ing|ed)?\b", r"\bhook(?:s|ed|ing)?\b", r"\bgrab(?:s|bed|bing)?\b"],
-    # Fixed: only match terrain creation, not "through terrain/walls"
-    "Terrain": [r"\bcreate(?:s|ing)?\s+(?:impassable\s+)?terrain\b", r"\bcreate(?:s|ing)?\s+(?:a\s+)?wall\b", r"\bimpassable\s+(?:terrain|wall|barrier)\b", r"\bpillar\b", r"\berect(?:s|ing)?\b"],
+    # Fixed: strictly match actual player-made terrain creation (excludes shields, windwalls, and existing terrain)
+    "Terrain": [
+        r"\b(?:impassable\s+terrain|terraforms?\b)",
+        r"\b(?:create|summon|erect)(?:s|ing|ed)?\s+[\w\s]{0,30}?(?:destructible\s+wall|wall\s+of\s+ice|wall\s+of\s+soldiers|magma\s+pillar|very\s+long\s+wall)\b",
+        r"\bmagma\s+pillar\s+forms\b",
+    ],
     "Execute": [r"\bexecut(?:e[sd]?|ing|ion)\b"],
     "Reset": [r"\breset(?:s)?\b", r"\brefund(?:s|ed)?\b"],
     # Fixed: tightened AOE to require explicit area-of-effect language
@@ -69,13 +72,14 @@ EFFECT_KEYWORDS = {
 class SpellAnalyzer:
     """Analyze champion ability descriptions to extract CC types and effects."""
 
-    def analyze(self):
+    def analyze(self, champions = None):
         """
-        Read processed champions data and add cc_types + ability_effects.
-        Updates src/processors/processed/champions.json in-place.
+        Analyze champion ability descriptions to extract CC types and effects.
+        Accepts in-memory champion dict or loads from disk as fallback.
         """
-        print("[SpellAnalyzer] Loading champion data...")
-        champions = self.load_champions()
+        if not champions:
+            print("[SpellAnalyzer] Loading champion data from disk...")
+            champions = self.load_champions()
 
         if not champions:
             print("[SpellAnalyzer] ERROR: No champion data found!")
@@ -90,8 +94,8 @@ class SpellAnalyzer:
             cc_types, effects = self.analyze_champion(champ)
 
             # Classify CC into hard and soft
-            hard_cc = sorted([cc for cc in cc_types if cc in HARD_CC_TYPES])
-            soft_cc = sorted([cc for cc in cc_types if cc in SOFT_CC_TYPES])
+            hard_cc = sorted([cc for cc in cc_types if cc in hard_cc_types])
+            soft_cc = sorted([cc for cc in cc_types if cc in soft_cc_types])
 
             champ["cc_types"] = cc_types
             champ["hard_cc"] = hard_cc
@@ -100,7 +104,6 @@ class SpellAnalyzer:
             total_cc += len(cc_types)
             total_effects += len(effects)
 
-        self.save_champions(champions)
         print(f"[SpellAnalyzer] Total CC annotations: {total_cc}")
         print(f"[SpellAnalyzer] Total effect annotations: {total_effects}")
         return champions
@@ -130,7 +133,7 @@ class SpellAnalyzer:
         # Strip HTML and lowercase
         text_clean = re.sub(r"<[^>]+>", " ", text.lower())
         found = set()
-        for cc_type, patterns in CC_KEYWORDS.items():
+        for cc_type, patterns in cc_keywords.items():
             for pattern in patterns:
                 if re.search(pattern, text_clean):
                     found.add(cc_type)
@@ -144,7 +147,7 @@ class SpellAnalyzer:
             return set()
         text_clean = re.sub(r"<[^>]+>", " ", text.lower())
         found = set()
-        for effect_type, patterns in EFFECT_KEYWORDS.items():
+        for effect_type, patterns in effect_keywords.items():
             for pattern in patterns:
                 if re.search(pattern, text_clean):
                     found.add(effect_type)
@@ -154,9 +157,9 @@ class SpellAnalyzer:
     @staticmethod
     def load_champions():
         """Load processed champion data."""
-        return load_json(PROCESSED_DIR / "champions.json")
+        return load_json(processed_dir / "champions.json")
 
     @staticmethod
     def save_champions(data):
         """Save updated champion data."""
-        return save_json(data, PROCESSED_DIR / "champions.json")
+        return save_json(data, processed_dir / "champions.json")

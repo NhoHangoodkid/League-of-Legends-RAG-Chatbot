@@ -14,11 +14,11 @@ import re
 from pathlib import Path
 
 from .utils import (
-    CDRAGON_RAW_DIR,
-    DDRAGON_RAW_DIR,
-    LORE_RAW_DIR,
-    MERAKI_RAW_DIR,
-    PROCESSED_DIR,
+    CDRAGON_raw_dir,
+    DDRAGON_raw_dir,
+    LORE_raw_dir,
+    MERAKI_raw_dir,
+    processed_dir,
     load_json,
     save_json,
     log,
@@ -37,8 +37,9 @@ class ChampionMerger:
         self.cdragon_data = {}
         self.meraki_data = {}
         self.lore_data = {}
+        self.universe_stories = {}
 
-    def merge(self):
+    def merge(self, save_to_disk = False):
         """
         Load all raw sources and merge into unified champion data.
         Returns dict of {champion_id: merged_data}.
@@ -64,8 +65,11 @@ class ChampionMerger:
 
             merged[champ_id] = self.merge_champion(champ_id, raw_dd, raw_cd, raw_mk, raw_lore)
 
-        self.save(merged)
-        print(f"[ChampionMerger] Saved {len(merged)} merged champions")
+        if save_to_disk:
+            self.save(merged)
+            print(f"[ChampionMerger] Saved {len(merged)} merged champions to disk")
+        else:
+            print(f"[ChampionMerger] Merged {len(merged)} champions (in-memory)")
         return merged
 
     def merge_champion(self, champ_id, raw_dd, raw_cd, raw_mk, raw_lore):
@@ -105,6 +109,38 @@ class ChampionMerger:
         if name and name != champ_id and name not in aliases:
             aliases.insert(0, name)
 
+        # Collect enriched metadata
+        allytips = parsed_dd.get("allytips", [])
+        enemytips = parsed_dd.get("enemytips", [])
+        skins = parsed_dd.get("skins", [])
+        aram_stats = parsed_mk.get("aramStats", {})
+        price = parsed_mk.get("price", {})
+        release_date = parsed_mk.get("releaseDate") or raw_lore.get("release_date", "")
+        patch_last_changed = parsed_mk.get("patchLastChanged", "")
+
+        champ_slug = re.sub(r"[^a-zA-Z0-9]", "", champ_id.lower())
+        stories = self.universe_stories.get(champ_slug, self.universe_stories.get(champ_id.lower(), []))
+
+        attack_type = parsed_mk.get("attackType", "")
+        if not attack_type:
+            rng = stats.get("attackrange", {}).get("base", 175) if isinstance(stats.get("attackrange"), dict) else (stats.get("attackrange") or 175)
+            attack_type = "MELEE" if rng <= 325 else "RANGED"
+
+        adaptive_type = parsed_mk.get("adaptiveType", "")
+        if not adaptive_type:
+            adaptive_type = "MAGIC_DAMAGE" if "mage" in [r.lower() for r in roles] else "PHYSICAL_DAMAGE"
+
+        ratings = parsed_mk.get("attributeRatings", {})
+        if not ratings:
+            roles_lower = [r.lower() for r in roles]
+            ratings = {
+                "damage": 3 if any(r in ["assassin", "marksman", "fighter", "mage"] for r in roles_lower) else 2,
+                "toughness": 3 if "tank" in roles_lower else (2 if "fighter" in roles_lower else 1),
+                "control": 2 if any(r in ["tank", "support", "mage"] for r in roles_lower) else 1,
+                "mobility": 2 if any(r in ["assassin", "fighter"] for r in roles_lower) else 1,
+                "utility": 2 if "support" in roles_lower else 1,
+            }
+
         return {
             "id": champ_id,
             "name": name,
@@ -112,6 +148,7 @@ class ChampionMerger:
             "aliases": aliases,
             "lore": champion_lore,
             "shortLore": short_lore,
+            "stories": stories,
             "region": region,
             "faction_slug": faction_slug,
             "quote": quote,
@@ -119,14 +156,21 @@ class ChampionMerger:
             "roles": roles,
             "subroles": parsed_mk.get("roles", []),
             "positions": parsed_mk.get("positions", []),
-            "attributeRatings": parsed_mk.get("attributeRatings", {}),
+            "attributeRatings": ratings,
             "resource": parsed_mk.get("resource", "") or parsed_dd.get("partype", ""),
-            "attackType": parsed_mk.get("attackType", ""),
-            "adaptiveType": parsed_mk.get("adaptiveType", ""),
+            "attackType": attack_type,
+            "adaptiveType": adaptive_type,
             "stats": stats,
+            "aramStats": aram_stats,
             "abilities": abilities,
             "tacticalInfo": tactical,
             "playstyleRatings": playstyle_ratings,
+            "allytips": allytips,
+            "enemytips": enemytips,
+            "skins": skins,
+            "price": price,
+            "releaseDate": release_date,
+            "patchLastChanged": patch_last_changed,
             "difficulty": parsed_dd.get("info", {}).get("difficulty", tactical.get("difficulty", 0)),
             "image": parsed_dd.get("image", ""),
             "sources": self.list_sources(raw_dd, raw_cd, raw_mk),
@@ -162,6 +206,18 @@ class ChampionMerger:
                 }
 
         stats = raw.get("stats", {})
+        allytips = [clean_html(t) for t in raw.get("allytips", []) if clean_html(t)]
+        enemytips = [clean_html(t) for t in raw.get("enemytips", []) if clean_html(t)]
+        skins = []
+        for s in raw.get("skins", []):
+            if isinstance(s, dict):
+                skins.append({
+                    "id": str(s.get("id", "")),
+                    "num": s.get("num", 0),
+                    "name": s.get("name", ""),
+                    "chromas": bool(s.get("chromas", False)),
+                })
+
         return {
             "id": raw.get("id", ""),
             "name": raw.get("name", ""),
@@ -173,6 +229,9 @@ class ChampionMerger:
             "info": raw.get("info", {}),
             "stats": stats,
             "abilities": abilities,
+            "allytips": allytips,
+            "enemytips": enemytips,
+            "skins": skins,
             "image": raw.get("image", {}).get("full", ""),
         }
 
@@ -242,21 +301,45 @@ class ChampionMerger:
             else:
                 stats[stat_name] = {"base": stat_data, "perLevel": 0}
 
+        raw_stats = raw.get("stats", {})
+        aram_stats = {}
+        for k, v in raw_stats.items():
+            if k.startswith("aram") and isinstance(v, dict):
+                flat_val = v.get("flat", 1.0)
+                if flat_val not in (1.0, 0.0, 1, 0, None):
+                    aram_stats[k] = flat_val
+            elif k.startswith("aram") and v not in (0, 1, 0.0, 1.0, None):
+                aram_stats[k] = v
+
         abilities = {}
         passive_data = raw.get("abilities", {}).get("P", [])
         if passive_data:
             p = passive_data[0] if isinstance(passive_data, list) else passive_data
+            p_text = (json.dumps(p.get("effects", [])) + " " + (p.get("notes") or "")).lower()
+            p_onhit = bool(p.get("onHitEffects")) or ("on-hit" in p_text or "on hit" in p_text)
+            p_proj = str(p.get("projectile", "")).upper() in ("TRUE", "SPECIAL")
+            p_shield = str(p.get("spellshieldable", "")).upper() in ("TRUE", "SPECIAL")
             abilities["passive"] = {
                 "name": p.get("name", ""),
                 "description": clean_html(p.get("description", "")),
                 "icon": p.get("icon", ""),
                 "effects": p.get("effects", []),
+                "projectile": p_proj,
+                "projectileType": p.get("projectile"),
+                "spellshieldable": p_shield,
+                "onHitEffects": p_onhit,
+                "damageType": p.get("damageType"),
+                "notes": p.get("notes"),
             }
 
         for key in ["Q", "W", "E", "R"]:
             spell_data = raw.get("abilities", {}).get(key, [])
             if spell_data:
                 spell = spell_data[0] if isinstance(spell_data, list) else spell_data
+                sp_text = (json.dumps(spell.get("effects", [])) + " " + (spell.get("notes") or "")).lower()
+                is_proj = str(spell.get("projectile", "")).upper() in ("TRUE", "SPECIAL")
+                is_shield = str(spell.get("spellshieldable", "")).upper() in ("TRUE", "SPECIAL")
+                is_onhit = bool(spell.get("onHitEffects")) or ("on-hit" in sp_text or "on hit" in sp_text)
                 abilities[key] = {
                     "name": spell.get("name", ""),
                     "description": clean_html(spell.get("description", "")),
@@ -265,6 +348,14 @@ class ChampionMerger:
                     "cost": self.extract_meraki_scaling(spell.get("cost", {})),
                     "costType": spell.get("costType", ""),
                     "effects": spell.get("effects", []),
+                    "projectile": is_proj,
+                    "projectileType": spell.get("projectile"),
+                    "spellshieldable": is_shield,
+                    "onHitEffects": is_onhit,
+                    "damageType": spell.get("damageType"),
+                    "targeting": spell.get("targeting"),
+                    "affects": spell.get("affects"),
+                    "notes": spell.get("notes"),
                 }
 
         return {
@@ -275,10 +366,15 @@ class ChampionMerger:
             "attackType": raw.get("attackType", ""),
             "adaptiveType": raw.get("adaptiveType", ""),
             "stats": stats,
+            "aramStats": aram_stats,
             "abilities": abilities,
             "roles": raw.get("roles", []),
             "positions": raw.get("positions", []),
             "attributeRatings": raw.get("attributeRatings", {}),
+            "price": raw.get("price", {}),
+            "releaseDate": raw.get("releaseDate", ""),
+            "releasePatch": raw.get("releasePatch", ""),
+            "patchLastChanged": raw.get("patchLastChanged", ""),
             "lore": raw.get("lore", ""),
         }
 
@@ -352,7 +448,7 @@ class ChampionMerger:
         return {}
 
     def merge_abilities(self, dd_abilities, cd_abilities, mk_abilities):
-        """Merge abilities from all sources. Now includes scaling effects & icons."""
+        """Merge abilities from all sources. Now includes scaling effects and icons."""
         merged = {}
         all_keys = {"passive", "Q", "W", "E", "R"}
 
@@ -394,6 +490,12 @@ class ChampionMerger:
             if mk_effects:
                 ability["scalingEffects"] = mk_effects
 
+            # Meraki micro mechanics and interaction properties
+            for mech in ["projectile", "projectileType", "spellshieldable", "onHitEffects", "damageType", "targeting", "affects", "notes"]:
+                val = mk_spell.get(mech)
+                if val is not None and val != "":
+                    ability[mech] = val
+
             merged[key] = ability
 
         return merged
@@ -411,10 +513,10 @@ class ChampionMerger:
 
     def load_sources(self):
         """Load all raw data from disk and normalize keys using the alias registry."""
-        self.ddragon_data = self.load_json(DDRAGON_RAW_DIR / "champions.json") or {}
-        raw_cd = self.load_json(CDRAGON_RAW_DIR / "champions.json") or {}
-        self.meraki_data = self.load_json(MERAKI_RAW_DIR / "champions.json") or {}
-        raw_lore = self.load_json(LORE_RAW_DIR / "lore.json") or {}
+        self.ddragon_data = self.load_json(DDRAGON_raw_dir / "champions.json") or {}
+        raw_cd = self.load_json(CDRAGON_raw_dir / "champions.json") or {}
+        self.meraki_data = self.load_json(MERAKI_raw_dir / "champions.json") or {}
+        raw_lore = self.load_json(LORE_raw_dir / "lore.json") or {}
 
         # Normalize CDragon keys using alias registry (handles FiddleSticks→Fiddlesticks, filters Jade_*)
         self.cdragon_data = {}
@@ -439,10 +541,36 @@ class ChampionMerger:
                 if normalized and normalized in master_ids:
                     self.lore_data[normalized] = v
 
-        print(f"  DDragon: {len(self.ddragon_data)} champions")
-        print(f"  CDragon: {len(self.cdragon_data)} champions (normalized)")
-        print(f"  Meraki:  {len(self.meraki_data)} champions")
-        print(f"  Lore:    {len(self.lore_data)} entries (normalized)")
+        # Load Color Stories from universe directory
+        self.universe_stories = {}
+        universe_dir = LORE_raw_dir / "universe"
+        if universe_dir.exists():
+            for fpath in universe_dir.glob("*.json"):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        u_data = json.load(f)
+                    modules = u_data.get("modules", [])
+                    u_stories = []
+                    for m in modules:
+                        if m.get("type") == "story-preview":
+                            u_stories.append({
+                                "title": m.get("title", ""),
+                                "description": clean_html(m.get("description", "")),
+                                "story_slug": m.get("story-slug", ""),
+                                "url": m.get("url", ""),
+                                "release_date": m.get("release-date", "")
+                            })
+                    if u_stories:
+                        stem = fpath.stem.lower()
+                        self.universe_stories[stem] = u_stories
+                except Exception:
+                    pass
+
+        print(f"  DDragon:  {len(self.ddragon_data)} champions")
+        print(f"  CDragon:  {len(self.cdragon_data)} champions (normalized)")
+        print(f"  Meraki:   {len(self.meraki_data)} champions")
+        print(f"  Lore:     {len(self.lore_data)} entries (normalized)")
+        print(f"  Universe: {len(self.universe_stories)} champions with Color Stories")
 
         # Report lore coverage gaps
         missing_lore = master_ids - set(self.lore_data.keys())
@@ -451,8 +579,8 @@ class ChampionMerger:
 
     def save(self, data):
         """Save merged data to processed directory."""
-        PROCESSED_DIR.mkdir(parents = True, exist_ok = True)
-        filepath = PROCESSED_DIR / "champions.json"
+        processed_dir.mkdir(parents = True, exist_ok = True)
+        filepath = processed_dir / "champions.json"
         with open(filepath, "w", encoding = "utf-8") as f:
             json.dump(data, f, indent = 2, ensure_ascii = False)
 

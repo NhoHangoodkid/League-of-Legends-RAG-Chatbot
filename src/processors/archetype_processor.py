@@ -1,5 +1,5 @@
 """
-Archetype & Composition Processor.
+Archetype and Composition Processor.
 
 100% Automated, Data-Driven Pipeline:
 - Analyzes all 173 champions into strategic tactical compositions and archetypes.
@@ -16,11 +16,11 @@ from collections import Counter, defaultdict
 
 from .utils import log
 
-TAG = "ArchetypeProcessor"
+tag = "ArchetypeProcessor"
 
-# Dynamic Archetype Metadata & Classification Registry
+# Dynamic Archetype Metadata and Classification Registry
 # Pure algorithmic classification functions: evaluate champion attributes with ZERO hardcoded names
-ARCHETYPE_CONFIGS = [
+archetype_configs = [
     # 1. Range Profiles
     {
         "comp_id": "ranged",
@@ -51,12 +51,12 @@ ARCHETYPE_CONFIGS = [
         "keywords": ["full ap", "all ap", "ap heavy", "magic damage", "pure ap"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: adp == "MAGIC_DAMAGE",
     },
-    # 3. Tactical & Mechanical Profiles
+    # 3. Tactical and Mechanical Profiles
     {
         "comp_id": "dive",
-        "name": "Dive & Hard Engage Composition",
+        "name": "Dive and Hard Engage Composition",
         "category": "tactical_profile",
-        "keywords": ["dive", "hard engage", "all in", "flank", "backline dive", "diving"],
+        "keywords": ["dive", "hard engage", "engage", "engaging", "all in", "flank", "backline dive", "diving", "engage comp"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
             "diver" in s
             or ("Dash" in e and rat.get("mobility", 0) >= 2 and bool(r & {"fighter", "assassin", "tank"}))
@@ -65,7 +65,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "poke",
-        "name": "Poke & Artillery Composition",
+        "name": "Poke and Artillery Composition",
         "category": "tactical_profile",
         "keywords": ["poke", "artillery", "siege", "long range poke", "harass"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -87,7 +87,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "sustain",
-        "name": "High Sustain & Healing Composition",
+        "name": "High Sustain and Healing Composition",
         "category": "tactical_profile",
         "keywords": ["sustain", "heal", "healing", "vamp", "high sustain", "health regen"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -96,7 +96,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "stealth",
-        "name": "Stealth & Ambush Composition",
+        "name": "Stealth and Ambush Composition",
         "category": "tactical_profile",
         "keywords": ["stealth", "invisibility", "camouflage", "ambush", "guerrilla"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -105,7 +105,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "shield_heavy",
-        "name": "Shield & Protective Composition",
+        "name": "Shield and Protective Composition",
         "category": "tactical_profile",
         "keywords": ["shield", "shield heavy", "protect carry", "barrier", "enchanter shield"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -114,7 +114,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "high_mobility",
-        "name": "High Mobility & Skirmish Composition",
+        "name": "High Mobility and Skirmish Composition",
         "category": "tactical_profile",
         "keywords": ["mobility", "high mobility", "dash", "blink", "slippery", "skirmish"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -125,7 +125,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "splitpush",
-        "name": "Split-Push & Duelist Composition",
+        "name": "Split-Push and Duelist Composition",
         "category": "tactical_profile",
         "keywords": ["splitpush", "split push", "duelist", "side lane", "isolated split"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -134,7 +134,7 @@ ARCHETYPE_CONFIGS = [
     },
     {
         "comp_id": "wombo_combo",
-        "name": "Wombo Combo & AoE Teamfight Composition",
+        "name": "Wombo Combo and AoE Teamfight Composition",
         "category": "tactical_profile",
         "keywords": ["wombo combo", "wombo", "aoe teamfight", "catastrophic aoe", "ultimate combo"],
         "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: (
@@ -142,66 +142,101 @@ ARCHETYPE_CONFIGS = [
         ),
     },
     # 4. Role Dominance Profiles
+    # 4. Role Dominance Profiles
     {
         "comp_id": "fighter_heavy",
-        "name": "Fighter & Bruiser Heavy Composition",
+        "name": "Fighter and Bruiser Heavy Composition",
         "category": "role_profile",
-        "keywords": ["fighter", "bruiser", "juggernaut", "skirmisher", "many fighters", "heavy fighter"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "fighter" in r or bool(s & {"fighter", "juggernaut", "diver", "skirmisher"}),
+        "keywords": ["fighter heavy", "bruiser heavy", "juggernaut heavy", "many fighters", "heavy fighter", "fighter comp", "bruiser comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "fighter" in r or bool(s & {"fighter", "juggernaut", "diver", "skirmisher"}),
     },
     {
         "comp_id": "assassin_heavy",
         "name": "Assassin Heavy Composition",
         "category": "role_profile",
-        "keywords": ["assassin", "slayer", "many assassins", "burst assassin", "squishy killer"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "assassin" in r or "assassin" in s,
+        "keywords": ["assassin heavy", "slayer heavy", "many assassins", "burst assassin comp", "squishy killer comp", "heavy assassin", "assassin comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "assassin" in r or "assassin" in s,
     },
     {
         "comp_id": "mage_heavy",
         "name": "Mage Heavy Composition",
         "category": "role_profile",
-        "keywords": ["mage", "spellcaster", "many mages", "burst mage", "caster"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "mage" in r or bool(s & {"mage", "burst", "battlemage", "artillery"}),
+        "keywords": ["mage heavy", "spellcaster heavy", "many mages", "burst mage comp", "caster comp", "heavy mage", "ap mage comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "mage" in r or bool(s & {"mage", "battlemage", "artillery"}) or ("MAGIC" in adp and bool(s & {"burst"})),
     },
     {
         "comp_id": "tank_heavy",
-        "name": "Tank & Frontline Heavy Composition",
+        "name": "Tank and Frontline Heavy Composition",
         "category": "role_profile",
-        "keywords": ["tank", "frontline", "many tanks", "vanguard", "warden", "tanky"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "tank" in r or bool(s & {"tank", "vanguard", "warden"}),
+        "keywords": ["tank heavy", "frontline heavy", "many tanks", "vanguard comp", "warden comp", "tanky comp", "heavy tank", "tank comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "tank" in r or bool(s & {"tank", "vanguard", "warden"}),
     },
     {
         "comp_id": "marksman_heavy",
-        "name": "Marksman & ADC Heavy Composition",
+        "name": "Marksman and ADC Heavy Composition",
         "category": "role_profile",
-        "keywords": ["marksman", "adc", "many marksmen", "multi adc", "ad carry", "many adc"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "marksman" in r or "marksman" in s,
+        "keywords": ["marksman heavy", "adc heavy", "many marksmen", "multi adc", "ad carry comp", "many adc", "double adc", "adc comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "marksman" in r or "marksman" in s,
     },
     {
         "comp_id": "support_heavy",
-        "name": "Enchanter & Utility Support Composition",
+        "name": "Enchanter and Utility Support Composition",
         "category": "role_profile",
-        "keywords": ["support", "enchanter", "utility", "many supports", "catcher", "buff comp"],
-        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp: "support" in r or bool(s & {"support", "enchanter", "catcher"}),
+        "keywords": ["support heavy", "enchanter heavy", "utility comp", "many supports", "catcher comp", "buff comp", "double support", "multi support", "support comp"],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: "support" in r or bool(s & {"support", "enchanter", "catcher"}),
+    },
+    # 5. Hypercarry and Late-Game Scaling Profile
+    {
+        "comp_id": "hypercarry_protect",
+        "name": "Protect the Hypercarry and Late-Game Scaling Composition",
+        "category": "tactical_profile",
+        "keywords": [
+            "hypercarry", "hyper carry", "protect the hypercarry", "protect the carry",
+            "hypercarry comp", "protect carry comp", "scaling comp", "late game comp",
+            "late game scaling", "late-game scaling", "infinite scaling", "scaling hypercarry",
+            "late game hypercarry", "protect hypercarry"
+        ],
+        "classifier": lambda r, s, e, cc, hcc, rat, ps, wc, rng, atk, adp, pc=None: (
+            ("marksman" in r and rat.get("damage", 0) >= 3 and rng >= 550)
+            or bool(s & {"hypercarry", "enchanter", "warden"})
+            or ("peel" in ps and bool(r & {"support", "tank"}))
+            or ("Shield" in e and bool(r & {"support", "tank"}))
+            or (pc and "LateGame" in pc and rat.get("damage", 0) >= 3)
+        ),
     },
 ]
+
+# Standalone words reserved for individual champion roles/mechanics to avoid accidental comp hijacking
+reserved_role_words = {
+    "support", "supports", "supp", "sp", "enchanter", "catcher",
+    "tank", "tanks", "vanguard", "warden",
+    "mage", "mages", "caster", "casters",
+    "marksman", "marksmen", "adc", "adcs",
+    "fighter", "fighters", "bruiser", "bruisers", "juggernaut", "skirmisher",
+    "assassin", "assassins", "slayer", "slayers",
+    "melee", "ranged", "shield", "heal", "healing", "dash", "blink", "kite",
+    "top", "mid", "bot", "jungle", "jg"
+}
 
 
 def generate_english_aliases(comp_id, name, keywords):
     """
     Generate natural, comprehensive English query aliases dynamically.
     Guarantees 100% English queries with ZERO hardcoded Vietnamese phrases.
+    Excludes standalone single-word roles to avoid hijacking user role queries.
     """
     aliases_set = set()
-    aliases_set.add(comp_id.replace("_", " "))
-    aliases_set.add(comp_id)
+    if comp_id not in reserved_role_words:
+        aliases_set.add(comp_id.replace("_", " "))
+        aliases_set.add(comp_id)
     aliases_set.add(name.lower())
 
     for kw in keywords:
         k = kw.lower().strip()
         variations = {k, k.replace("-", " "), k.replace(" ", "-")}
         for v in variations:
-            aliases_set.add(v)
+            if v not in reserved_role_words:
+                aliases_set.add(v)
             aliases_set.add(f"{v} comp")
             aliases_set.add(f"{v} comps")
             aliases_set.add(f"{v} team")
@@ -215,7 +250,8 @@ def generate_english_aliases(comp_id, name, keywords):
             aliases_set.add(f"{v} heavy")
             aliases_set.add(f"lots of {v}")
 
-    return sorted(list(aliases_set), key=lambda x: len(x), reverse=True)
+    filtered_aliases = [a for a in aliases_set if a not in reserved_role_words]
+    return sorted(filtered_aliases, key=lambda x: len(x), reverse=True)
 
 
 # Archetype Processor Class
@@ -228,19 +264,19 @@ class ArchetypeProcessor:
     def __init__(self):
         pass
 
-    def process(self, champions, counters=None, items=None):
+    def process(self, champions, counters = None, items = None):
         """
         Process all champions into strategic archetypes and compute counter matrices.
         Returns a dictionary of archetype documents formatted for MongoDB persistence.
         """
-        log(TAG, f"Analyzing {len(champions)} champions into archetype compositions...")
+        log(tag, f"Analyzing {len(champions)} champions into archetype compositions...")
         counters = counters or {}
         items = items or {}
         item_lookup = {it.get("name"): it for it in items.values() if isinstance(it, dict) and it.get("name")}
 
         compositions = {}
 
-        for cfg in ARCHETYPE_CONFIGS:
+        for cfg in archetype_configs:
             comp_id = cfg["comp_id"]
             name = cfg["name"]
             category = cfg["category"]
@@ -260,13 +296,19 @@ class ArchetypeProcessor:
                 ratings = c.get("attributeRatings", {})
                 playstyles = set(x.lower() for x in c.get("playstyles", []))
                 win_conditions = set(c.get("winConditions", []))
+                power_curves = set(c.get("powerCurve", []))
                 stats = c.get("stats", {})
                 ar_val = stats.get("attackrange", 0)
                 rng = ar_val.get("base", 0) if isinstance(ar_val, dict) else (ar_val or 0)
                 atk = (c.get("attackType") or "").upper()
                 adp = (c.get("adaptiveType") or "").upper()
 
-                if classifier(roles, subroles, effects, cc_types, hard_cc, ratings, playstyles, win_conditions, rng, atk, adp):
+                try:
+                    is_member = classifier(roles, subroles, effects, cc_types, hard_cc, ratings, playstyles, win_conditions, rng, atk, adp, power_curves)
+                except TypeError:
+                    is_member = classifier(roles, subroles, effects, cc_types, hard_cc, ratings, playstyles, win_conditions, rng, atk, adp)
+
+                if is_member:
                     member_ids.append(cid)
                     member_champs.append(c)
 
@@ -334,17 +376,32 @@ class ArchetypeProcessor:
                     "tactical_reason": synthesized_reason,
                 })
 
-            # 4. Top Counter Items Aggregation with Dynamic Stats
+            # 4. Determine Dominant Damage Profile
+            ad_count = sum(1 for c in member_champs if "PHYSICAL" in (c.get("adaptiveType") or "").upper())
+            ap_count = sum(1 for c in member_champs if "MAGIC" in (c.get("adaptiveType") or "").upper())
+            dominant_damage = "Physical Damage" if ad_count > ap_count else ("Magic Damage" if ap_count > ad_count else "Mixed Damage")
+
+            # 5. Top Counter Items Aggregation with Damage-Type Gating and Dynamic Stats
             top_counter_items = []
-            for item_name, count in item_counts.most_common(8):
-                pct = round((count / total_members) * 100, 1)
+            for item_name, count in item_counts.most_common(16):
                 item_obj = item_lookup.get(item_name, {})
+                stats_dict = item_obj.get("stats", {})
+                item_ar = stats_dict.get("armor", 0)
+                item_mr = stats_dict.get("magic_resist", 0)
+
+                # Damage type gating: do not recommend pure armor items against pure magic damage comps
+                if dominant_damage == "Magic Damage" and item_ar > 0 and item_mr == 0:
+                    continue
+                # Do not recommend pure MR items against pure physical damage comps
+                if dominant_damage == "Physical Damage" and item_mr > 0 and item_ar == 0:
+                    continue
+
+                pct = round((count / total_members) * 100, 1)
                 plaintext = (item_obj.get("plaintext") or "").strip()
                 raw_desc = item_obj.get("description", "")
                 clean_desc = re.sub(r"<[^>]+>", " ", raw_desc).strip()
                 clean_desc = " ".join(clean_desc.split())
 
-                stats_dict = item_obj.get("stats", {})
                 stats_summary = ", ".join(
                     f"{val} {k.replace('flat_', '').replace('_', ' ').title()}"
                     for k, val in stats_dict.items() if val
@@ -366,12 +423,11 @@ class ArchetypeProcessor:
                     "archetype_coverage_pct": pct,
                     "tactical_purpose": purpose,
                 })
+                if len(top_counter_items) >= 8:
+                    break
 
-            # 5. Synthesize Dynamic English Description
+            # 6. Synthesize Dynamic English Description
             sample_preview = ", ".join(member_names[:6])
-            ad_count = sum(1 for c in member_champs if (c.get("adaptiveType") or "").upper() == "PHYSICAL_DAMAGE")
-            ap_count = sum(1 for c in member_champs if (c.get("adaptiveType") or "").upper() == "MAGIC_DAMAGE")
-            dominant_damage = "Physical Damage" if ad_count > ap_count else ("Magic Damage" if ap_count > ad_count else "Mixed Damage")
 
             role_counter = Counter(r for c in member_champs for r in c.get("roles", []))
             top_roles_str = ", ".join(r.capitalize() for r, _ in role_counter.most_common(2))
@@ -398,6 +454,7 @@ class ArchetypeProcessor:
                 "aliases": english_aliases,
                 "total_member_count": total_members,
                 "sample_champions": member_names[:15],
+                "member_champions": member_names,
                 "all_champions": member_names,
                 "counter_picks": top_counter_picks,
                 "counter_items": top_counter_items,
@@ -407,8 +464,8 @@ class ArchetypeProcessor:
 
             compositions[comp_id] = comp_doc
 
-        log(TAG, f"Generated {len(compositions)} 100% automated English archetype profiles for MongoDB.")
+        log(tag, f"Generated {len(compositions)} 100% automated English archetype profiles for MongoDB.")
         return compositions
 
 
-__all__ = ["ArchetypeProcessor", "ARCHETYPE_CONFIGS"]
+__all__ = ["ArchetypeProcessor", "archetype_configs"]

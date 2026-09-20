@@ -19,9 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .utils import (
-    PROCESSED_DIR,
-    PROJECT_ROOT,
-    SRC_DIR,
+    processed_dir,
+    project_root,
+    src_dir,
     load_json,
     log,
     save_json,
@@ -30,7 +30,7 @@ from .utils import (
 # Load environment configuration
 try:
     from dotenv import load_dotenv
-    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(project_root / ".env")
 except ImportError:
     pass
 
@@ -38,26 +38,26 @@ except ImportError:
 try:
     from pymongo import MongoClient, ReplaceOne
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-    PYMONGO_AVAILABLE = True
+    pymongo_available = True
 except ImportError:
-    PYMONGO_AVAILABLE = False
+    pymongo_available = False
 
 
-# Constants & Default Configurations
-KB_DIR = SRC_DIR / "data" / "knowledge_base"
-DEFAULT_MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DEFAULT_DB_NAME = os.getenv("MONGO_DB_NAME", "lol_rag_db")
-DEFAULT_SYNC_ENABLED = os.getenv("MONGO_SYNC_ENABLED", "true").lower() in ("true", "1", "yes")
-TAG = "MongoSync"
+# Constants and Default Configurations
+kb_dir = src_dir / "data" / "knowledge_base"
+default_mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+default_db_name = os.getenv("MONGO_DB_NAME", "lol_rag_db")
+default_sync_enabled = os.getenv("MONGO_SYNC_ENABLED", "true").lower() in ("true", "1", "yes")
+tag = "MongoSync"
 
 
 class MongoSyncManager:
     """Synchronize processed game data and knowledge base relationships to MongoDB."""
 
     def __init__(self, uri = None, db_name = None, enabled = None, timeout_ms = 3000):
-        self.uri = uri or DEFAULT_MONGO_URI
-        self.db_name = db_name or DEFAULT_DB_NAME
-        self.enabled = DEFAULT_SYNC_ENABLED if enabled is None else enabled
+        self.uri = uri or default_mongo_uri
+        self.db_name = db_name or default_db_name
+        self.enabled = default_sync_enabled if enabled is None else enabled
         self.timeout_ms = timeout_ms
 
         self.client = None
@@ -69,8 +69,8 @@ class MongoSyncManager:
 
     def connect(self):
         """Establish MongoDB connection with timeout and verify ping response."""
-        if not PYMONGO_AVAILABLE:
-            log(TAG, "pymongo library is not installed. Install via: pip install pymongo")
+        if not pymongo_available:
+            log(tag, "pymongo library is not installed. Install via: pip install pymongo")
             self._connected = False
             return False
 
@@ -79,10 +79,10 @@ class MongoSyncManager:
             self.client.admin.command("ping")
             self.db = self.client[self.db_name]
             self._connected = True
-            log(TAG, f"Successfully connected to MongoDB at {self.uri} (Database: {self.db_name})")
+            log(tag, f"Successfully connected to MongoDB at {self.uri} (Database: {self.db_name})")
             return True
         except (ConnectionFailure, ServerSelectionTimeoutError, Exception) as e:
-            log(TAG, f"WARNING: Could not connect to MongoDB ({e}). Skipping MongoDB sync.")
+            log(tag, f"WARNING: Could not connect to MongoDB ({e}). Skipping MongoDB sync.")
             self._connected = False
             self.client = None
             self.db = None
@@ -102,8 +102,8 @@ class MongoSyncManager:
         if not self.is_connected():
             return {"champions": 0, "counters": 0, "synergies": 0, "builds": 0}
 
-        kb_path = kb_dir or KB_DIR
-        proc_path = processed_dir or PROCESSED_DIR
+        kb_path = kb_dir or kb_dir
+        proc_path = processed_dir or processed_dir
 
         # Load merged champions if not passed in memory
         if not champions_data:
@@ -112,8 +112,11 @@ class MongoSyncManager:
                 champions_data = load_json(kb_path / "champions.json")
 
         if not champions_data:
-            log(TAG, "No champion data found to synchronize.")
+            log(tag, "No champion data found to synchronize.")
             return {"champions": 0, "counters": 0, "synergies": 0, "builds": 0}
+
+        if not synergies_data:
+            synergies_data = load_json(proc_path / "synergies.json") or load_json(kb_path / "synergies.json")
 
         counters_dir = kb_path / "counters"
         synergies_dir = kb_path / "synergies"
@@ -130,7 +133,7 @@ class MongoSyncManager:
             doc["_id"] = str(cid)
             doc["updated_at"] = now_iso
 
-            # 1. Embed & store counter profile
+            # 1. Embed and store counter profile
             c_info = None
             if counters_data and cid in counters_data:
                 c_info = counters_data[cid]
@@ -143,39 +146,75 @@ class MongoSyncManager:
                         break
 
             if c_info:
-                doc["counters"] = {
-                    "weakAgainst": c_info.get("weakAgainst", []),
-                    "strongAgainst": c_info.get("strongAgainst", []),
-                }
+                doc["counters"] = c_info
                 c_doc = dict(c_info)
                 c_doc["_id"] = str(cid)
                 c_doc["champion_id"] = str(cid)
                 c_doc["champion"] = cdata.get("name", str(cid))
                 c_doc["updated_at"] = now_iso
+
+                # Enrich counter profile with complete tactical intelligence from champion tacticalInfo
+                tactical = cdata.get("tacticalInfo", {})
+                if tactical:
+                    c_doc["weaknesses"] = tactical.get("weaknesses", [])
+                    c_doc["tactical_tips"] = tactical.get("tactical_tips", [])
+                    c_doc["counter_items"] = tactical.get("counter_items", [])
+                    c_doc["official_enemytips"] = tactical.get("official_enemytips", cdata.get("enemytips", []))
+                    c_doc["official_allytips"] = tactical.get("official_allytips", cdata.get("allytips", []))
+                    c_doc["projectile_abilities"] = tactical.get("projectile_abilities", [])
+                    c_doc["spellshieldable_abilities"] = tactical.get("spellshieldable_abilities", [])
+                    c_doc["onhit_abilities"] = tactical.get("onhit_abilities", [])
+                    c_doc["aram_summary"] = tactical.get("aram_summary", "")
+
                 counter_ops.append(ReplaceOne({"_id": c_doc["_id"]}, c_doc, upsert = True))
 
-            # 2. Embed & store synergy profile
+            # 2. Embed and store synergy profile
             s_info = None
-            if synergies_data and cid in synergies_data:
-                s_info = synergies_data[cid]
+            if synergies_data:
+                s_info = (
+                    synergies_data.get(cid) or
+                    synergies_data.get(cdata.get("name")) or
+                    synergies_data.get(str(cid).capitalize())
+                )
             elif doc.get("synergies"):
                 s_info = {"synergies": doc["synergies"]} if isinstance(doc["synergies"], list) else doc["synergies"]
             else:
-                for candidate in [synergies_dir / f"{cid}_synergy.json", synergies_dir / f"{cid.lower()}_synergy.json"]:
+                for candidate in [
+                    synergies_dir / f"{cid}_synergy.json",
+                    synergies_dir / f"{cid.lower()}_synergy.json",
+                    synergies_dir / "synergies.json"
+                ]:
                     if candidate.exists():
-                        s_info = load_json(candidate)
-                        break
+                        loaded = load_json(candidate)
+                        if isinstance(loaded, dict) and (cid in loaded or cdata.get("name") in loaded):
+                            s_info = loaded.get(cid) or loaded.get(cdata.get("name"))
+                            break
+                        elif candidate.name != "synergies.json":
+                            s_info = loaded
+                            break
 
             if s_info:
-                doc["synergies"] = s_info.get("synergies", []) if isinstance(s_info, dict) else s_info
+                best_duos = s_info.get("best_duos") or s_info.get("synergies", [])
+                doc["synergies"] = best_duos
                 s_doc = dict(s_info) if isinstance(s_info, dict) else {"synergies": s_info}
                 s_doc["_id"] = str(cid)
                 s_doc["champion_id"] = str(cid)
-                s_doc["champion"] = cdata.get("name", str(cid))
+                c_name = cdata.get("name", str(cid))
+                s_doc["champion"] = c_name
+                s_doc["best_duos"] = best_duos
+                s_doc["synergies"] = best_duos
+                s_doc["tactical_insights"] = s_info.get("tactical_insights", [])
+                s_doc["role"] = s_info.get("role", "")
                 s_doc["updated_at"] = now_iso
                 synergy_ops.append(ReplaceOne({"_id": s_doc["_id"]}, s_doc, upsert = True))
+                # Also upsert by canonical champion name if different from cid
+                if c_name != str(cid):
+                    name_doc = dict(s_doc)
+                    name_doc["_id"] = c_name
+                    synergy_ops.append(ReplaceOne({"_id": name_doc["_id"]}, name_doc, upsert = True))
 
-            # 3. Embed & store build guide
+
+            # 3. Embed and store build guide
             b_info = None
             if builds_data and cid in builds_data:
                 b_info = builds_data[cid]
@@ -215,19 +254,22 @@ class MongoSyncManager:
             self.db.champions.create_index("region")
             self.db.champions.create_index("powerCurve")
             self.db.champions.create_index("winConditions")
-            log(TAG, f"Synced {len(operations)} champions (embedded counters, synergies, builds) -> 'champions'")
+            log(tag, f"Synced {len(operations)} champions (embedded counters, synergies, builds) -> 'champions'")
 
         if counter_ops:
+            self.db.counters.delete_many({"_id": {"$nin": [str(k) for k in champions_data.keys()]}})
             self.db.counters.bulk_write(counter_ops, ordered = False)
-            log(TAG, f"Synced {len(counter_ops)} counter profiles -> 'counters'")
+            self.db.counters.create_index("champion")
+            self.db.counters.create_index("champion_id")
+            log(tag, f"Synced {len(counter_ops)} counter profiles -> 'counters'")
 
         if synergy_ops:
             self.db.synergies.bulk_write(synergy_ops, ordered = False)
-            log(TAG, f"Synced {len(synergy_ops)} synergy profiles -> 'synergies'")
+            log(tag, f"Synced {len(synergy_ops)} synergy profiles -> 'synergies'")
 
         if build_ops:
             self.db.builds.bulk_write(build_ops, ordered = False)
-            log(TAG, f"Synced {len(build_ops)} build guides -> 'builds'")
+            log(tag, f"Synced {len(build_ops)} build guides -> 'builds'")
 
         return {
             "champions": len(operations),
@@ -241,14 +283,14 @@ class MongoSyncManager:
         if not self.is_connected():
             return 0
 
-        proc_path = processed_dir or PROCESSED_DIR
+        proc_path = processed_dir or processed_dir
         if not items_data:
             items_data = load_json(proc_path / "items.json")
             if not items_data:
-                items_data = load_json(KB_DIR / "items.json")
+                items_data = load_json(kb_dir / "items.json")
 
         if not items_data:
-            log(TAG, "No item data found to synchronize.")
+            log(tag, "No item data found to synchronize.")
             return 0
 
         operations = []
@@ -264,7 +306,7 @@ class MongoSyncManager:
             self.db.items.bulk_write(operations, ordered = False)
             self.db.items.create_index("name")
             self.db.items.create_index("tags")
-            log(TAG, f"Synced {len(operations)} items -> 'items'")
+            log(tag, f"Synced {len(operations)} items -> 'items'")
 
         return len(operations)
 
@@ -273,14 +315,14 @@ class MongoSyncManager:
         if not self.is_connected():
             return 0
 
-        proc_path = processed_dir or PROCESSED_DIR
+        proc_path = processed_dir or processed_dir
         if not runes_data:
             runes_data = load_json(proc_path / "runes.json")
             if not runes_data:
-                runes_data = load_json(KB_DIR / "runes.json")
+                runes_data = load_json(kb_dir / "runes.json")
 
         if not runes_data:
-            log(TAG, "No rune data found to synchronize.")
+            log(tag, "No rune data found to synchronize.")
             return 0
 
         operations = []
@@ -311,7 +353,7 @@ class MongoSyncManager:
             self.db.runes.bulk_write(operations, ordered = False)
             self.db.runes.create_index("name")
             self.db.runes.create_index("tree")
-            log(TAG, f"Synced {len(operations)} runes & rune trees -> 'runes'")
+            log(tag, f"Synced {len(operations)} runes and rune trees -> 'runes'")
 
         return len(operations)
 
@@ -340,25 +382,35 @@ class MongoSyncManager:
             operations.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert = True))
 
         if operations:
+            self.db.relationships.delete_many({})
             self.db.relationships.bulk_write(operations, ordered = False)
             self.db.relationships.create_index([("source_id", 1), ("type", 1)])
             self.db.relationships.create_index([("target_id", 1), ("type", 1)])
             self.db.relationships.create_index("type")
             self.db.relationships.create_index("source_name")
             self.db.relationships.create_index("target_name")
-            log(TAG, f"Synced {len(operations)} typed relationships -> 'relationships'")
+            log(tag, f"Synced {len(operations)} typed relationships -> 'relationships'")
 
         return len(operations)
 
-    def sync_team_compositions(self, compositions_data = None):
+    def sync_team_compositions(self, compositions_data = None, kb_dir = None, processed_dir = None):
         """
-        Synchronize analyzed champion archetype team compositions into MongoDB 'team_compositions' collection.
+        Synchronize analyzed champion archetype team compositions and champion-centric pro team comps into MongoDB.
         Enables O(1) retrieval for team archetype counter matchups, items, and weaknesses.
         """
-        if not self.is_connected() or not compositions_data:
+        if not self.is_connected():
             return 0
 
-        # Purge existing collection to guarantee zero residual Vietnamese or legacy hardcoded documents
+        kb_path = kb_dir or kb_dir
+        proc_path = processed_dir or processed_dir
+
+        if not compositions_data:
+            compositions_data = load_json(proc_path / "team_compositions.json") or load_json(kb_path / "team_compositions.json")
+
+        if not compositions_data:
+            return 0
+
+        # Purge existing collection
         self.db.team_compositions.delete_many({})
 
         operations = []
@@ -373,9 +425,10 @@ class MongoSyncManager:
         if operations:
             self.db.team_compositions.bulk_write(operations, ordered = False)
             self.db.team_compositions.create_index("comp_id")
+            self.db.team_compositions.create_index("focus_champion")
             self.db.team_compositions.create_index("category")
             self.db.team_compositions.create_index("aliases")
-            log(TAG, f"Synced {len(operations)} team compositions -> 'team_compositions'")
+            log(tag, f"Synced {len(operations)} team compositions -> 'team_compositions'")
 
         return len(operations)
 
@@ -394,7 +447,7 @@ class MongoSyncManager:
         runes = results.get("runes")
         team_compositions = results.get("team_compositions")
 
-        log(TAG, "STARTING MONGODB SYNCHRONIZATION")
+        log(tag, "STARTING MONGODB SYNCHRONIZATION")
 
         c_stats = self.sync_champions(
             champions_data = champions,
@@ -419,7 +472,7 @@ class MongoSyncManager:
         comp_count = self.sync_team_compositions(team_compositions)
 
         log(
-            TAG,
+            tag,
             f"COMPLETED: {c_count} champions, {i_count} items, {r_count} runes, "
             f"{counter_count} counters, {synergy_count} synergies, {build_count} builds, "
             f"{rel_count} relationships, {comp_count} team compositions synced to '{self.db_name}'."

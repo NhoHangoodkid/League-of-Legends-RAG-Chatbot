@@ -1,5 +1,5 @@
 """
-Champion Enricher & Automated Tactical Counter Engine.
+Champion Enricher and Automated Tactical Counter Engine.
 
 Adds strategic and relational metadata to champions with 100% automated coverage:
 - Playstyles (Burst, Poke, Sustained, Utility, Engage, etc.) - 100% Automated
@@ -7,20 +7,20 @@ Adds strategic and relational metadata to champions with 100% automated coverage
 - Win conditions (Teamfight, Splitpush, Pick, Siege, Objective, Skirmish) - 100% Automated
 - Subroles (17 Riot official classifications: Juggernaut, Vanguard, Artillery, Skirmisher, etc.)
 - Positions (Top, Jungle, Mid, Bot, Support)
-- Tactical Counter Intelligence (Weaknesses, Tactical Tips, Counter Items, Matchup Dynamics) - 100% Automated & in English.
+- Tactical Counter Intelligence (Weaknesses, Tactical Tips, Counter Items, Matchup Dynamics) - 100% Automated and in English.
 Zero hardcoded champion name dictionaries. Designed to scale seamlessly to 1,000+ champions.
 """
 
 import os
 
 
-from .utils import PROCESSED_DIR, load_json, save_json, log
+from .utils import processed_dir, load_json, save_json, log
 
 
 # Tunable Heuristic Thresholds (Centralized Configuration)
 # Adjust these values to fine-tune automated classification accuracy.
 
-THRESHOLDS = {
+thresholds = {
     # Range Classification
     "melee_range_max": 225,         # Attack range <= this → melee
     "ranged_min": 500,              # Attack range >= this → ranged carry
@@ -47,7 +47,7 @@ THRESHOLDS = {
 
 # Ability Keyword Detection (for automated kit analysis)
 
-ABILITY_KEYWORDS = {
+ability_keywords = {
     "channel": ["channel", "duration of up to", "interrupted by crowd control"],
     "heal_drain": ["heal", "vamp", "lifesteal", "drain", "restores health"],
     "shield": ["shield", "absorbs damage"],
@@ -57,7 +57,7 @@ ABILITY_KEYWORDS = {
 
 # Counter Item Profiles (grouped by defensive purpose)
 
-COUNTER_ITEM_PROFILES = {
+counter_item_profiles = {
     "anti_physical_ranged": ["Plated Steelcaps", "Frozen Heart", "Randuin's Omen", "Thornmail"],
     "anti_physical_melee": ["Plated Steelcaps", "Zhonya's Hourglass", "Death's Dance", "Sterak's Gage"],
     "anti_magic": ["Mercury's Treads", "Kaenic Rookern", "Maw of Malmortius", "Banshee's Veil"],
@@ -69,15 +69,15 @@ COUNTER_ITEM_PROFILES = {
 # 100% Automated Tactical Counter Engine (Scalable to 1,000+ Champions)
 # All generated data is strictly maintained in standard English.
 
-def derive_tactical_counter(champ, existing_counter_doc=None):
+def derive_tactical_counter(champ, existing_counter_doc = None):
     """
     Derive comprehensive tactical counter metadata 100% algorithmically from champion telemetry.
     
     Evaluates:
-    1. Range & Spacing (Melee kiting vulnerability vs. Ranged dive vulnerability)
+    1. Range and Spacing (Melee kiting vulnerability vs. Ranged dive vulnerability)
     2. Mobility Profile (Dash/Blink cooldown exploitation vs. Immobile gank susceptibility)
-    3. Durability & Resilience (Squishy burst targets vs. High-armor/HP tank shred)
-    4. Primary Damage Profile & Defensive Counter Items (Armor, MR, Grievous Wounds, % HP shred)
+    3. Durability and Resilience (Squishy burst targets vs. High-armor/HP tank shred)
+    4. Primary Damage Profile and Defensive Counter Items (Armor, MR, Grievous Wounds, % HP shred)
     5. Ability Mechanics (Channeled ultimates, skillshot reliance, ability cooldown windows)
     6. Analytical Matchup Dynamics (English reason synthesis)
     
@@ -90,18 +90,19 @@ def derive_tactical_counter(champ, existing_counter_doc=None):
     stats = champ.get("stats", {})
     adaptive_type = (champ.get("adaptiveType") or "").lower()
     attack_type = (champ.get("attackType") or "").lower()
+    positions = set(p.upper() for p in champ.get("positions", []))
     
     # Extract attack range
     range_val = stats.get("attackrange", {}).get("base", 0) if isinstance(stats.get("attackrange"), dict) else (stats.get("attackrange") or 0)
     
-    # Abilities inspection (keyword-driven from ABILITY_KEYWORDS config)
+    # Abilities inspection (keyword-driven from ability_keywords config)
     abilities = champ.get("abilities", {})
-    ability_flags = {key: False for key in ABILITY_KEYWORDS}
+    ability_flags = {key: False for key in ability_keywords}
 
     for _k, ab in abilities.items():
         if isinstance(ab, dict):
             desc = (ab.get("description") or "").lower()
-            for flag_key, keywords in ABILITY_KEYWORDS.items():
+            for flag_key, keywords in ability_keywords.items():
                 if any(w in desc for w in keywords):
                     ability_flags[flag_key] = True
 
@@ -109,32 +110,33 @@ def derive_tactical_counter(champ, existing_counter_doc=None):
     has_heal_drain = ability_flags["heal_drain"]
     has_shield = ability_flags["shield"]
     has_stealth = ability_flags["stealth"]
-    has_dash = ability_flags["dash"]
+    # Use SpellAnalyzer's ability_effects for dash/blink (more accurate than keyword matching)
+    has_dash = "Dash" in champ.get("ability_effects", []) or "Blink" in champ.get("ability_effects", [])
 
-    mobility_rating = ratings.get("mobility", THRESHOLDS["low_rating"])
-    toughness_rating = ratings.get("toughness", THRESHOLDS["low_rating"])
-    damage_rating = ratings.get("damage", THRESHOLDS["medium_rating"])
-    control_rating = ratings.get("control", THRESHOLDS["low_rating"])
+    mobility_rating = ratings.get("mobility", thresholds["low_rating"])
+    toughness_rating = ratings.get("toughness", thresholds["low_rating"])
+    damage_rating = ratings.get("damage", thresholds["medium_rating"])
+    control_rating = ratings.get("control", thresholds["low_rating"])
 
     # 1. Core Tactical Weaknesses (English)
     weaknesses = []
 
-    # A. Range & Positioning Weakness
-    if range_val <= THRESHOLDS["melee_range_max"] or attack_type == "melee":
+    # A. Range and Positioning Weakness
+    if range_val <= thresholds["melee_range_max"] or attack_type == "melee":
         weaknesses.append("Short melee combat range; highly vulnerable to continuous ranged kiting, ground slows, and perimeter zoning.")
-    elif range_val >= THRESHOLDS["ranged_min"]:
+    elif range_val >= thresholds["ranged_min"]:
         weaknesses.append("Low base health and armor; extremely fragile when caught out of position by flanking assassins or sudden gap-closers.")
 
     # B. Mobility Profile Weakness
-    if mobility_rating <= THRESHOLDS["low_rating"] and not has_dash:
+    if mobility_rating <= thresholds["low_rating"] and not has_dash:
         weaknesses.append("Immobile with no native dash or terrain-crossing escape; extremely vulnerable to coordinated jungle ganks and linear skillshot CC.")
-    elif mobility_rating >= THRESHOLDS["medium_rating"] or has_dash:
+    elif mobility_rating >= thresholds["medium_rating"] or has_dash:
         weaknesses.append("High reliance on mobility cooldowns; baiting or interrupting their primary dash leaves them completely over-committed with no disengage.")
 
-    # C. Durability & Target Profile
-    if toughness_rating <= THRESHOLDS["low_rating"]:
+    # C. Durability and Target Profile
+    if toughness_rating <= thresholds["low_rating"]:
         weaknesses.append("Vulnerable to rapid burst rotations; easily eliminated in a single crowd control lockdown before they can react.")
-    elif toughness_rating >= THRESHOLDS["high_rating"] or subroles & {"VANGUARD", "WARDEN", "JUGGERNAUT"}:
+    elif toughness_rating >= thresholds["high_rating"] or subroles & {"VANGUARD", "WARDEN", "JUGGERNAUT"}:
         weaknesses.append("Susceptible to sustained percentage maximum health damage and armor/magic penetration in extended skirmishes.")
 
     # D. Ability Specific Weaknesses
@@ -148,26 +150,34 @@ def derive_tactical_counter(champ, existing_counter_doc=None):
 
     # 2. Actionable Tactical Tips (English)
     tactical_tips = []
+    is_ranged_solo_laner = (range_val >= thresholds["ranged_min"] or attack_type != "melee") and bool({"TOP", "MID"} & set(positions))
 
-    if range_val <= THRESHOLDS["melee_range_max"] or attack_type == "melee":
+    if is_ranged_solo_laner:
+        tactical_tips.append("Freeze the minion wave near your turret and coordinate early jungle ganks; fragile ranged solo-laners pushing without frontline protection cannot survive 2v1 collapses.")
+        tactical_tips.append("Concede early minion gold to preserve your health pool; avoid taking free ranged poke and look for all-in burst trades when their defensive tools are on cooldown.")
+
+    if range_val <= thresholds["melee_range_max"] or attack_type == "melee":
         tactical_tips.append("Maintain defensive perimeter spacing: utilize ranged poke and slowing abilities to kite them outside their effective engagement radius.")
         tactical_tips.append("Avoid extended trades; execute short trades and disengage before they can stack conqueror or sustained passives.")
-    elif range_val >= THRESHOLDS["ranged_min"]:
+    elif range_val >= thresholds["ranged_min"] and not is_ranged_solo_laner:
         tactical_tips.append("Execute flanking routes through fog of war to isolate and burst down the backline before front-to-back teamfights begin.")
-        tactical_tips.append("Force them to expend primary waveclear abilities under turret, significantly reducing their lane trading pressure.")
+        if "AOE" in champ.get("ability_effects", []):
+            tactical_tips.append("Force them to expend primary waveclear abilities under turret, significantly reducing their lane trading pressure.")
 
-    if mobility_rating >= THRESHOLDS["medium_rating"] or has_dash:
+    if has_stealth:
+        tactical_tips.append("Deploy Control Wards in river and lane bushes, and use Oracle Lens (Sweeper) to outline and target their stealth positioning.")
+
+    if mobility_rating >= thresholds["medium_rating"] or has_dash:
         tactical_tips.append("Never throw primary skillshots proactively while their dash or blink is off cooldown. Bait their mobility skill first, then punish.")
-        tactical_tips.append("Hold point-and-click crowd control specifically until they dive into your team's perimeter.")
-    else:
+        if not is_ranged_solo_laner:
+            tactical_tips.append("Hold point-and-click crowd control specifically until they dive into your team's perimeter.")
+    elif not is_ranged_solo_laner:
         tactical_tips.append("Coordinate early jungle ganks when they push past lane midpoint; immobile champions cannot escape collapse ganks without burning Flash.")
 
     if has_channel:
         tactical_tips.append("Save hard crowd control (stun, airborne, silence) specifically to interrupt their channeled ultimate, negating their primary teamfight impact.")
     if has_heal_drain:
         tactical_tips.append("Prioritize purchasing an early Grievous Wounds component (Bramble Vest, Executioner's Calling, or Oblivion Orb) on your first recall.")
-    if has_stealth:
-        tactical_tips.append("Deploy Control Wards in river and jungle choke points, and use Oracle Lens (Sweeper) to outline and target their stealth positioning.")
 
     # Ensure 3-4 concise tactical tips
     tactical_tips = tactical_tips[:4]
@@ -175,27 +185,27 @@ def derive_tactical_counter(champ, existing_counter_doc=None):
     # 3. Recommended Counter Items (English - clean item names)
     counter_items = []
 
-    # Physical damage profile
-    if adaptive_type == "physical" or "marksman" in roles or "assassin" in roles:
-        if "marksman" in roles or range_val >= THRESHOLDS["ranged_min"] or "SKIRMISHER" in subroles:
-            counter_items.extend(COUNTER_ITEM_PROFILES["anti_physical_ranged"])
+    # Primary defensive itemization based on incoming damage type
+    if "magic" in adaptive_type or ("mage" in roles and "physical" not in adaptive_type):
+        counter_items.extend(counter_item_profiles["anti_magic"])
+    elif "physical" in adaptive_type or "marksman" in roles:
+        if "marksman" in roles or range_val >= thresholds["ranged_min"] or "SKIRMISHER" in subroles:
+            counter_items.extend(counter_item_profiles["anti_physical_ranged"])
         else:
-            counter_items.extend(COUNTER_ITEM_PROFILES["anti_physical_melee"])
+            counter_items.extend(counter_item_profiles["anti_physical_melee"])
+    else:
+        counter_items.extend(counter_item_profiles["fallback"])
 
-    # Magic damage profile
-    elif adaptive_type == "magic" or "mage" in roles:
-        counter_items.extend(COUNTER_ITEM_PROFILES["anti_magic"])
-
-    # Anti-tank & Anti-healing universal counters
-    if toughness_rating >= THRESHOLDS["high_rating"] or subroles & {"VANGUARD", "WARDEN", "JUGGERNAUT"}:
-        counter_items.extend(COUNTER_ITEM_PROFILES["anti_tank"])
+    # Anti-tank and Anti-healing universal counters
+    if toughness_rating >= thresholds["high_rating"] or subroles & {"VANGUARD", "WARDEN", "JUGGERNAUT"}:
+        counter_items.extend(counter_item_profiles["anti_tank"])
 
     if has_heal_drain:
-        counter_items.extend(COUNTER_ITEM_PROFILES["anti_heal"])
+        counter_items.extend(counter_item_profiles["anti_heal"])
 
     # Fallback defense
     if not counter_items:
-        counter_items = list(COUNTER_ITEM_PROFILES["fallback"])
+        counter_items = list(counter_item_profiles["fallback"])
 
     # Deduplicate and limit to top 3 items
     counter_items = list(dict.fromkeys(counter_items))[:3]
@@ -338,12 +348,14 @@ def derive_english_matchup_reason(champ_a, champ_b, is_counter, champ_profile):
 class Enricher:
     """Add strategic and relational metadata to champions with 100% automated coverage."""
 
-    def enrich(self):
+    def enrich(self, champions = None):
         """
-        Read processed champion data, compute strategic metadata, and update champions.json.
+        Enrich champion data with strategic metadata.
+        Accepts in-memory champion dict or loads from disk as fallback.
         """
-        print("[Enricher] Loading champion data...")
-        champions = self.load_champions()
+        if not champions:
+            print("[Enricher] Loading champion data from disk...")
+            champions = self.load_champions()
 
         if not champions:
             print("[Enricher] ERROR: No champion data found!")
@@ -377,7 +389,7 @@ class Enricher:
             # 5. 100% Automated Power Curve
             power_curve = self.compute_power_curve(champ_id, champ, subroles)
 
-            # 6. Region & Related Champions normalization
+            # 6. Region and Related Champions normalization
             region = champ.get("region", "Runeterra (Unaffiliated)")
             if not region or region.strip() == "":
                 region = "Runeterra (Unaffiliated)"
@@ -401,8 +413,7 @@ class Enricher:
                 "counter_items": tactical_info.get("counter_items", [])
             }
 
-        # Save updated data
-        self.save_champions(champions)
+        # No disk save — MongoDB is the single output destination
         print(f"[Enricher] Successfully enriched 100% ({len(champions)}/{len(champions)}) champions!")
         return champions
 
@@ -423,7 +434,7 @@ class Enricher:
             conditions.add("Teamfight")
         if ps_lower & {"engage", "aoe", "lockdown", "zone", "peel"}:
             conditions.add("Teamfight")
-        if ratings.get("control", 0) >= THRESHOLDS["high_rating"] or ratings.get("toughness", 0) >= THRESHOLDS["high_rating"]:
+        if ratings.get("control", 0) >= thresholds["high_rating"] or ratings.get("toughness", 0) >= thresholds["high_rating"]:
             conditions.add("Teamfight")
 
         # Splitpush
@@ -432,7 +443,7 @@ class Enricher:
         if ps_lower & {"splitpush", "duelist"}:
             conditions.add("Splitpush")
         if "JUGGERNAUT" in subroles_upper and ("TOP" in champ.get("positions", []) or "fighter" in roles):
-            if ratings.get("damage", 0) >= THRESHOLDS["medium_rating"] and ratings.get("toughness", 0) >= THRESHOLDS["medium_rating"]:
+            if ratings.get("damage", 0) >= thresholds["medium_rating"] and ratings.get("toughness", 0) >= thresholds["medium_rating"]:
                 conditions.add("Splitpush")
 
         # Pick
@@ -448,7 +459,7 @@ class Enricher:
             conditions.add("Siege")
 
         # Objective
-        if ps_lower & {"objective"} or (ratings.get("damage", 0) >= THRESHOLDS["high_rating"] and "marksman" in roles):
+        if ps_lower & {"objective"} or (ratings.get("damage", 0) >= thresholds["high_rating"] and "marksman" in roles):
             conditions.add("Objective")
 
         # Skirmish
@@ -491,19 +502,19 @@ class Enricher:
 
         # Late game scaling indicators
         is_late_scaler = (
-            ad_growth >= THRESHOLDS["late_ad_growth"] or
-            hp_growth >= THRESHOLDS["late_hp_growth"] or
-            (as_growth >= THRESHOLDS["late_as_growth"] and "marksman" in roles) or
-            (bool(subroles_upper & {"SKIRMISHER", "BATTLEMAGE"}) and ratings.get("damage", 0) >= THRESHOLDS["high_rating"]) or
-            ("marksman" in roles and ratings.get("damage", 0) >= THRESHOLDS["high_rating"])
+            ad_growth >= thresholds["late_ad_growth"] or
+            hp_growth >= thresholds["late_hp_growth"] or
+            (as_growth >= thresholds["late_as_growth"] and "marksman" in roles) or
+            (bool(subroles_upper & {"SKIRMISHER", "BATTLEMAGE"}) and ratings.get("damage", 0) >= thresholds["high_rating"]) or
+            ("marksman" in roles and ratings.get("damage", 0) >= thresholds["high_rating"])
         )
 
         # Early game bully indicators
         is_early_bully = (
-            (base_ad >= THRESHOLDS["early_base_ad_marksman"] and "marksman" in roles) or
-            (base_hp >= THRESHOLDS["early_base_hp_fighter"] and "fighter" in roles and ad_growth <= THRESHOLDS["early_ad_growth_cap"]) or
-            (bool(subroles_upper & {"DIVER", "CATCHER"}) and ratings.get("damage", 0) >= THRESHOLDS["high_rating"] and hp_growth < THRESHOLDS["early_hp_growth_cap_diver"]) or
-            (bool(subroles_upper & {"JUGGERNAUT"}) and base_ad >= THRESHOLDS["early_base_ad_juggernaut"] and hp_growth < THRESHOLDS["early_hp_growth_cap_juggernaut"])
+            (base_ad >= thresholds["early_base_ad_marksman"] and "marksman" in roles) or
+            (base_hp >= thresholds["early_base_hp_fighter"] and "fighter" in roles and ad_growth <= thresholds["early_ad_growth_cap"]) or
+            (bool(subroles_upper & {"DIVER", "CATCHER"}) and ratings.get("damage", 0) >= thresholds["high_rating"] and hp_growth < thresholds["early_hp_growth_cap_diver"]) or
+            (bool(subroles_upper & {"JUGGERNAUT"}) and base_ad >= thresholds["early_base_ad_juggernaut"] and hp_growth < thresholds["early_hp_growth_cap_juggernaut"])
         )
 
         if is_late_scaler and not is_early_bully:
@@ -571,14 +582,14 @@ class Enricher:
         range_val = champ.get("stats", {}).get("attackrange", {}).get("base", 0) if isinstance(champ.get("stats", {}).get("attackrange"), dict) else (champ.get("stats", {}).get("attackrange") or 0)
 
         # Core Archetypes
-        if "assassin" in roles or "ASSASSIN" in subroles or (ratings.get("damage", 0) >= THRESHOLDS["high_rating"] and ratings.get("mobility", 0) >= THRESHOLDS["medium_rating"]):
+        if "assassin" in roles or "ASSASSIN" in subroles or (ratings.get("damage", 0) >= thresholds["high_rating"] and ratings.get("mobility", 0) >= thresholds["medium_rating"]):
             playstyles.add("Burst")
             playstyles.add("Assassin")
         if "mage" in roles or "BURST" in subroles:
             playstyles.add("Mage")
-            if ratings.get("damage", 0) >= THRESHOLDS["medium_rating"]:
+            if ratings.get("damage", 0) >= thresholds["medium_rating"]:
                 playstyles.add("Burst")
-        if "marksman" in roles or "MARKSMAN" in subroles or (attack_type == "ranged" and range_val >= THRESHOLDS["ranged_min"] and "marksman" in roles):
+        if "marksman" in roles or "MARKSMAN" in subroles or (attack_type == "ranged" and range_val >= thresholds["ranged_min"] and "marksman" in roles):
             playstyles.add("Marksman")
             playstyles.add("Sustained")
         if "tank" in roles or subroles & {"VANGUARD", "WARDEN"}:
@@ -589,15 +600,15 @@ class Enricher:
             playstyles.add("Support")
 
         # Behavioral Tags
-        if ratings.get("mobility", 0) >= THRESHOLDS["medium_rating"]:
+        if ratings.get("mobility", 0) >= thresholds["medium_rating"]:
             playstyles.add("Mobility")
-        if "DIVER" in subroles or (ratings.get("mobility", 0) >= THRESHOLDS["medium_rating"] and ratings.get("toughness", 0) >= THRESHOLDS["medium_rating"]):
+        if "DIVER" in subroles or (ratings.get("mobility", 0) >= thresholds["medium_rating"] and ratings.get("toughness", 0) >= thresholds["medium_rating"]):
             playstyles.add("Dive")
-        if "ARTILLERY" in subroles or range_val >= THRESHOLDS["artillery_range_min"]:
+        if "ARTILLERY" in subroles or range_val >= thresholds["artillery_range_min"]:
             playstyles.add("Poke")
-        if ratings.get("control", 0) >= THRESHOLDS["medium_rating"]:
+        if ratings.get("control", 0) >= thresholds["medium_rating"]:
             playstyles.add("Engage")
-        if ratings.get("utility", 0) >= THRESHOLDS["medium_rating"] or "ENCHANTER" in subroles:
+        if ratings.get("utility", 0) >= thresholds["medium_rating"] or "ENCHANTER" in subroles:
             playstyles.add("Utility")
 
         if not playstyles:
@@ -607,17 +618,17 @@ class Enricher:
     @staticmethod
     def load_champions():
         """Load processed champion data."""
-        return load_json(PROCESSED_DIR / "champions.json")
+        return load_json(processed_dir / "champions.json")
 
     @staticmethod
     def save_champions(data):
         """Save updated champion data."""
-        return save_json(data, PROCESSED_DIR / "champions.json")
+        return save_json(data, processed_dir / "champions.json")
 
 
 # Direct MongoDB Tactical Enrichment (Zero JSON Files on Disk)
 
-def enrich_tactical_counters_to_mongo(uri=None, db_name=None):  # noqa: C901
+def enrich_tactical_counters_to_mongo(uri = None, db_name = None):  # noqa: C901
     """
     Directly enriches tactical counter profiles into MongoDB collections:
     - db.counters: adds English weaknesses, tactical_tips, counter_items, weakAgainst, strongAgainst.

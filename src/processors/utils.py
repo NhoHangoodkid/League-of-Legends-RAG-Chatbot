@@ -13,16 +13,16 @@ from pathlib import Path
 # Path Configuration
 
 # Processors directory: src/processors
-PROCESSORS_DIR = Path(__file__).resolve().parent
+processors_dir = Path(__file__).resolve().parent
 
 # Source root directory: src/
-SRC_DIR = PROCESSORS_DIR.parent
+src_dir = processors_dir.parent
 
 # Project root directory
-PROJECT_ROOT = SRC_DIR.parent
+project_root = src_dir.parent
 
 # Data directories (Standard output is in src/processors/processed)
-PROCESSED_DIR = PROCESSORS_DIR / "processed"
+processed_dir = processors_dir / "processed"
 
 
 def find_raw_dir():
@@ -33,39 +33,51 @@ def find_raw_dir():
     3. data/raw
     """
     candidate_paths = [
-        SRC_DIR / "collectors" / "raw",
-        SRC_DIR / "pipeline" / "collectors" / "raw",
-        PROJECT_ROOT / "data" / "raw",
-        SRC_DIR / "data" / "raw",
+        src_dir / "collectors" / "raw",
+        src_dir / "pipeline" / "collectors" / "raw",
+        project_root / "data" / "raw",
+        src_dir / "data" / "raw",
     ]
     for path in candidate_paths:
         if path.exists() and any(path.iterdir()):
             return path
 
     # Default to standard collectors raw dir
-    return SRC_DIR / "collectors" / "raw"
+    return src_dir / "collectors" / "raw"
 
 
-RAW_DIR = find_raw_dir()
+raw_dir = find_raw_dir()
 
 # Raw source subdirectories
-DDRAGON_RAW_DIR = RAW_DIR / "ddragon"
-CDRAGON_RAW_DIR = RAW_DIR / "cdragon"
-MERAKI_RAW_DIR = RAW_DIR / "meraki"
-LORE_RAW_DIR = RAW_DIR / "lore"
+DDRAGON_raw_dir = raw_dir / "ddragon"
+CDRAGON_raw_dir = raw_dir / "cdragon"
+MERAKI_raw_dir = raw_dir / "meraki"
+LORE_raw_dir = raw_dir / "lore"
+ORACLES_ELIXIR_raw_dir = raw_dir / "oracles_elixir"
+OPGG_SYNERGY_raw_dir = raw_dir / "opgg_synergy"
+BLITZ_raw_dir = raw_dir / "blitz"
 
 
 def ensure_dirs():
     """Ensure all processed and raw directories exist."""
-    for d in [PROCESSED_DIR, DDRAGON_RAW_DIR, CDRAGON_RAW_DIR, MERAKI_RAW_DIR, LORE_RAW_DIR]:
+    for d in [
+        processed_dir,
+        DDRAGON_raw_dir,
+        CDRAGON_raw_dir,
+        MERAKI_raw_dir,
+        LORE_raw_dir,
+        ORACLES_ELIXIR_raw_dir,
+        OPGG_SYNERGY_raw_dir,
+        BLITZ_raw_dir,
+    ]:
         d.mkdir(parents = True, exist_ok = True)
 
 
-# Champion Name Normalization & Alias Registry
+# Champion Name Normalization and Alias Registry
 
 # Maps variant names/IDs → canonical champion ID used in DDragon.
 # This handles discrepancies across DDragon, CDragon, Meraki, Lore, and user queries.
-CHAMPION_ALIASES = {
+champion_aliases = {
     # CDragon capitalization mismatch
     "FiddleSticks": "Fiddlesticks",
     # Lore data key mismatch
@@ -122,7 +134,7 @@ CHAMPION_ALIASES = {
     "Bel'Veth": "Belveth",
     "Belveth": "Belveth",
     "BelVeth": "Belveth",
-    "Nunu & Willump": "Nunu",
+    "Nunu and Willump": "Nunu",
     "Nunu": "Nunu",
     "Renata Glasc": "Renata",
     "Renata": "Renata",
@@ -131,19 +143,19 @@ CHAMPION_ALIASES = {
 }
 
 # Reverse lookup: canonical ID → list of known aliases (for search enrichment)
-_REVERSE_ALIASES = {}
-for _alias, _canonical in CHAMPION_ALIASES.items():
+reverse_aliases = {}
+for _alias, _canonical in champion_aliases.items():
     if _canonical == "__SKIP__":
         continue
-    if _canonical not in _REVERSE_ALIASES:
-        _REVERSE_ALIASES[_canonical] = []
-    if _alias != _canonical and _alias not in _REVERSE_ALIASES[_canonical]:
-        _REVERSE_ALIASES[_canonical].append(_alias)
+    if _canonical not in reverse_aliases:
+        reverse_aliases[_canonical] = []
+    if _alias != _canonical and _alias not in reverse_aliases[_canonical]:
+        reverse_aliases[_canonical].append(_alias)
 
 
 def get_champion_aliases(canonical_id):
     """Get all known aliases for a canonical champion ID."""
-    return _REVERSE_ALIASES.get(canonical_id, [])
+    return reverse_aliases.get(canonical_id, [])
 
 
 def normalize_champion_id(raw_key):
@@ -166,8 +178,8 @@ def normalize_champion_id(raw_key):
         return None
 
     # Direct alias lookup
-    if raw_key in CHAMPION_ALIASES:
-        result = CHAMPION_ALIASES[raw_key]
+    if raw_key in champion_aliases:
+        result = champion_aliases[raw_key]
         if result == "__SKIP__":
             return None
         return result
@@ -196,7 +208,7 @@ def build_lore_key_map(lore_keys, master_ids):
 # Item Stat Key Normalization
 
 # Maps Riot's internal stat property names to human-readable keys.
-ITEM_STAT_MAPPING = {
+item_stat_mapping = {
     # Flat stats
     "FlatPhysicalDamageMod": "attack_damage",
     "FlatMagicDamageMod": "ability_power",
@@ -245,7 +257,7 @@ def normalize_item_stats(raw_stats):
     for key, value in raw_stats.items():
         if value == 0 or value is None:
             continue
-        clean_key = ITEM_STAT_MAPPING.get(key, key)
+        clean_key = item_stat_mapping.get(key, key)
         normalized[clean_key] = value
     return normalized
 
@@ -259,7 +271,7 @@ def clean_html(text):
     """
     if not text:
         return ""
-    cleaned = re.sub(r"<[^>]+>", "", text)
+    cleaned = re.sub(r"<[^>]+>", " ", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -271,11 +283,11 @@ def clean_text(text):
     """
     if not text:
         return ""
-    # Remove HTML tags
-    cleaned = re.sub(r"<[^>]+>", "", text)
+    # Remove HTML tags with space separation to avoid glued words
+    cleaned = re.sub(r"<[^>]+>", " ", text)
     # Remove Riot formula placeholders: {{ e1 }}, @Effect1Amount@, etc.
-    cleaned = re.sub(r"\{\{[^}]+\}\}", "", cleaned)
-    cleaned = re.sub(r"@[^@]+@", "", cleaned)
+    cleaned = re.sub(r"\{\{[^}]+\}\}", " ", cleaned)
+    cleaned = re.sub(r"@[^@]+@", " ", cleaned)
     # Normalize whitespace
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
@@ -287,7 +299,7 @@ def load_json(path):
     """Load JSON file safely. Returns empty dict/list if not found."""
     if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding = "utf-8") as f:
                 return json.load(f)
         except Exception as e:
             log("ProcessorUtils", f"Error reading {path}: {e}")
@@ -299,7 +311,7 @@ def save_json(data, path, indent = 2):
     """Save data to JSON file with automatic directory creation."""
     try:
         path.parent.mkdir(parents = True, exist_ok = True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding = "utf-8") as f:
             json.dump(data, f, indent = indent, ensure_ascii = False)
         return True
     except Exception as e:
