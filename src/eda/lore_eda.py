@@ -1,5 +1,5 @@
 """
-Lore & Universe Exploratory Data Analysis (EDA) Module.
+Lore and Universe Exploratory Data Analysis (EDA) Module.
 
 Directly analyzes Universe lore datasets feeding into `ChampionMerger`:
 - Regional and faction classifications (`region`, `faction_slug`).
@@ -8,7 +8,6 @@ Directly analyzes Universe lore datasets feeding into `ChampionMerger`:
 """
 
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
 
 from eda.utils import (
     calculate_stats,
@@ -19,7 +18,7 @@ from eda.utils import (
     log,
 )
 
-TAG = "LoreEDA"
+tag = "LoreEDA"
 
 
 def analyze_lore_for_processor():
@@ -89,7 +88,7 @@ def analyze_lore_for_processor():
 
 def analyze_lore():
     """Execute complete lore EDA aligned with ChampionMerger."""
-    log(TAG, "Starting lore analysis aligned with ChampionMerger...")
+    log(tag, "Starting lore analysis aligned with ChampionMerger...")
 
     lore_info = analyze_lore_for_processor()
 
@@ -97,7 +96,7 @@ def analyze_lore():
         "lore_summary": lore_info,
     }
 
-    log(TAG, f"Analysis complete. Evaluated {lore_info['total_champions']} lore entries.")
+    log(tag, f"Analysis complete. Evaluated {lore_info['total_champions']} lore entries.")
     return results
 
 
@@ -108,7 +107,7 @@ def format_lore_report(results):
     sections = [
         "## 4. Phân Tích Dữ Liệu Cốt Truyện (Lore Enrichment Pipeline)",
         "",
-        "### 4.1 Phân Bố Khu Vực & Faction (Regions & Factions)",
+        "### 4.1 Phân Bố Khu Vực and Faction (Regions and Factions)",
         f"- **Tổng số tướng có tiểu sử**: {ls['total_champions']}",
         f"- **Số tướng có câu trích dẫn đặc trưng (Quote)**: {ls['has_quote_count']}/{ls['total_champions']}",
         "",

@@ -2,11 +2,11 @@
 
 ## 1. Phân Tích Dữ Liệu Tướng (Champion Processing Pipeline)
 
-### 1.1 Champion Merger: Nguồn Dữ Liệu & Cơ Chế Hợp Nhất
+### 1.1 Champion Merger: Nguồn Dữ Liệu and Cơ Chế Hợp Nhất
 - **Tổng số tướng Master Roster**: 174 tướng (DDragon + non-Jade CDragon)
 - **Độ phủ Meraki Stats**: 171/174 tướng (98.28%)
 - **Số tướng dùng Fallback DDragon Stats**: 2 (Zaahen, Locke)
-- **Độ phủ CDragon Tactical & Playstyle Info**: 173/174 tướng (99.43%)
+- **Độ phủ CDragon Tactical and Playstyle Info**: 173/174 tướng (99.43%)
 
 #### Độ phủ các nguồn đối với Master Champion Roster:
 | Nguồn Dữ Liệu | Số Tướng Có Mặt | Tỷ Lệ Bao Phủ |
@@ -16,7 +16,7 @@
 | MERAKI        | 171             | 98.28%        |
 | LORE          | 172             | 98.85%        |
 
-### 1.2 Phân Bố Chỉ Số Cơ Bản & Tăng Trưởng (Stats & Growth Formulas)
+### 1.2 Phân Bố Chỉ Số Cơ Bản and Tăng Trưởng (Stats and Growth Formulas)
 | Chỉ Số                  | Min   | 25%    | Trung Vị | Trung Bình | 75%   | Max   | Độ Lệch |
 | ----------------------- | ----- | ------ | -------- | ---------- | ----- | ----- | ------- |
 | Base Health (HP)        | 410.0 | 600.0  | 625.0    | 617.96     | 645.0 | 696.0 | 39.03   |
@@ -38,7 +38,7 @@
 - **Máu Cơ Bản (HP)**: Cao nhất [Tryndamere (696), Garen (690), Alistar (685), Amumu (685), Zac (685)] | Thấp nhất [Renata (545), Gnar (540), Senna (530), Yuumi (500), Kled (410)]
 - **Sát Thương (AD)**: Cao nhất [Chogath (69), Garen (69), Ornn (69), Renekton (69), Camille (68)] | Thấp nhất [Neeko (48), Janna (47), Lulu (47), Karthus (46), Orianna (44)]
 
-### 1.3 Spell Analyzer: Trích Xuất Khống Chế (CC) & Hiệu Ứng Chiêu Thức
+### 1.3 Spell Analyzer: Trích Xuất Khống Chế (CC) and Hiệu Ứng Chiêu Thức
 - **Số lượng loại CC trên mỗi tướng**: Trung bình 2.06 (Max: 4.0, Min: 0.0)
 - **Tướng thuần sát thương không có CC**: 6 (Akshan, Corki, Ezreal, Kaisa, Nidalee, Nilah...)
 
@@ -73,7 +73,7 @@
 
 ## 2. Phân Tích Dữ Liệu Trang Bị (Item Processing Pipeline)
 
-### 2.1 Item Merger: Mô Phỏng Bộ Lọc Cửa Hàng & Bản Đồ Summoner's Rift (Map 11)
+### 2.1 Item Merger: Mô Phỏng Bộ Lọc Cửa Hàng and Bản Đồ Summoner's Rift (Map 11)
 - **Tổng số bản ghi trang bị thô**: 868
 - **Số trang bị được giữ lại sau lọc**: 254 (29.26%)
 - **Số bản ghi bị loại bỏ**: 172 (Không mua được) | 442 (Không thuộc Map 11 SR / Chế độ khác)
@@ -119,7 +119,7 @@
 
 ## 3. Phân Tích Dữ Liệu Bảng Ngọc (Rune Processing Pipeline)
 
-### 3.1 Rune Merger: Cấu Trúc Bảng Ngọc byTree & byId
+### 3.1 Rune Merger: Cấu Trúc Bảng Ngọc byTree and byId
 - **Tổng số hệ ngọc chính (Trees)**: 5
 - **Tổng số ngọc siêu cấp (Keystones - Slot 0)**: 17
 - **Tổng số ngọc sơ cấp (Minor Runes - Slots 1, 2, 3)**: 45
@@ -133,7 +133,7 @@
 | Resolve     | 3             | 9           | 12      |
 | Sorcery     | 4             | 9           | 13      |
 
-### 3.2 Phân Tích Văn Bản Mô Tả & Cơ Chế Hiệu Ứng
+### 3.2 Phân Tích Văn Bản Mô Tả and Cơ Chế Hiệu Ứng
 - **Độ dài mô tả ngắn (Short Desc)**: Trung bình 16.45 từ (Max: 32.0 từ)
 - **Độ dài mô tả chi tiết (Long Desc)**: Trung bình 34.95 từ (Max: 79.0 từ)
 
@@ -156,7 +156,7 @@
 
 ## 4. Phân Tích Dữ Liệu Cốt Truyện (Lore Enrichment Pipeline)
 
-### 4.1 Phân Bố Khu Vực & Faction (Regions & Factions)
+### 4.1 Phân Bố Khu Vực and Faction (Regions and Factions)
 - **Tổng số tướng có tiểu sử**: 174
 - **Số tướng có câu trích dẫn đặc trưng (Quote)**: 174/174
 
@@ -197,7 +197,7 @@
 
 ---
 
-## 5. Đánh Giá Chất Lượng Dữ Liệu & Độ Sẵn Sàng Pipeline (Data Quality Audit)
+## 5. Đánh Giá Chất Lượng Dữ Liệu and Độ Sẵn Sàng Pipeline (Data Quality Audit)
 
 ### ⭐ Điểm Sẵn Sàng Cho Processor Pipeline (Readiness Score): **95.56%**
 

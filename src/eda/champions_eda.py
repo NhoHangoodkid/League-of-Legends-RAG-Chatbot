@@ -2,14 +2,13 @@
 Champions Exploratory Data Analysis (EDA) Module.
 
 Directly analyzes champion data according to the processing steps in:
-1. `ChampionMerger`: Master IDs, multi-source fallbacks (DDragon, CDragon, Meraki, Lore), base & scaling stats.
+1. `ChampionMerger`: Master IDs, multi-source fallbacks (DDragon, CDragon, Meraki, Lore), base and scaling stats.
 2. `SpellAnalyzer`: Ability extractions for Crowd Control (CC) types and ability effects.
 3. `Enricher`: Strategic playstyle tags, power curves, and win conditions.
 """
 
 import re
 from collections import Counter
-from typing import Any, Dict, List, Optional
 
 from eda.utils import (
     calculate_stats,
@@ -19,10 +18,10 @@ from eda.utils import (
     log,
 )
 
-TAG = "ChampionsEDA"
+tag = "ChampionsEDA"
 
 # Processor Keywords (from processors.spell_analyzer)
-CC_KEYWORDS = {
+cc_keywords = {
     "Stun": ["stun", "stunned", "stunning"],
     "Slow": ["slow", "slowed", "slowing"],
     "Root": ["root", "rooted", "rooting", "immobilize", "snare", "snared"],
@@ -39,7 +38,7 @@ CC_KEYWORDS = {
     "Stasis": ["stasis"],
 }
 
-EFFECT_KEYWORDS = {
+effect_keywords = {
     "Dash": ["dash", "dashes", "dashing", "leap", "leaps", "leaping", "jump", "jumps", "lunge", "lunges"],
     "Blink": ["blink", "blinks", "teleport", "teleports"],
     "Shield": ["shield", "shields", "shielding", "barrier"],
@@ -85,7 +84,7 @@ def analyze_champion_merge_inputs():
     meraki_stats_count = sum(1 for cid in master_ids if cid in meraki and "stats" in meraki[cid])
     fallback_ddragon = [cid for cid in master_ids if cid not in meraki and cid in ddragon]
 
-    # CDragon tactical & playstyle ratings
+    # CDragon tactical and playstyle ratings
     tactical_count = 0
     playstyle_count = 0
     for cid in master_ids:
@@ -169,7 +168,7 @@ def analyze_champion_stats_and_attributes():
         ad = mk_stats.get("attackDamage", {}).get("flat") if isinstance(mk_stats.get("attackDamage"), dict) else champ.get("stats", {}).get("attackdamage")
         ad_growth = mk_stats.get("attackDamage", {}).get("perLevel") if isinstance(mk_stats.get("attackDamage"), dict) else champ.get("stats", {}).get("attackdamageperlevel", 0)
 
-        # Range & Speed
+        # Range and Speed
         rng = mk_stats.get("attackRange", {}).get("flat") if isinstance(mk_stats.get("attackRange"), dict) else champ.get("stats", {}).get("attackrange")
         ms = mk_stats.get("movespeed", {}).get("flat") if isinstance(mk_stats.get("movespeed"), dict) else champ.get("stats", {}).get("movespeed")
         as_base = mk_stats.get("attackSpeed", {}).get("flat") if isinstance(mk_stats.get("attackSpeed"), dict) else champ.get("stats", {}).get("attackspeed")
@@ -280,8 +279,8 @@ def analyze_spell_analyzer_extraction():
         for spell in champ.get("spells", []):
             all_text += " " + spell.get("description", "") + " " + spell.get("tooltip", "")
 
-        ccs = extract_keywords(all_text, CC_KEYWORDS)
-        effs = extract_keywords(all_text, EFFECT_KEYWORDS)
+        ccs = extract_keywords(all_text, cc_keywords)
+        effs = extract_keywords(all_text, effect_keywords)
 
         for c in ccs: cc_counter[c] += 1
         for e in effs: effect_counter[e] += 1
@@ -315,21 +314,21 @@ def analyze_enricher_curation():
     ddragon = load_raw_json("ddragon", "champions.json") or {}
 
     try:
-        from processors.enricher import CHAMPION_PLAYSTYLES, POWER_CURVES, WIN_CONDITIONS
+        from processors.enricher import champion_playstyles, power_curves, win_conditions
     except Exception:
-        CHAMPION_PLAYSTYLES = {}
-        POWER_CURVES = {}
-        WIN_CONDITIONS = {}
+        champion_playstyles = {}
+        power_curves = {}
+        win_conditions = {}
 
     master_ids = set(ddragon.keys())
     total_master = len(master_ids)
 
-    missing_playstyles = sorted([cid for cid in master_ids if cid not in CHAMPION_PLAYSTYLES])
-    missing_powercurves = sorted([cid for cid in master_ids if cid not in POWER_CURVES])
-    missing_winconditions = sorted([cid for cid in master_ids if cid not in WIN_CONDITIONS])
+    missing_playstyles = sorted([cid for cid in master_ids if cid not in champion_playstyles])
+    missing_powercurves = sorted([cid for cid in master_ids if cid not in power_curves])
+    missing_winconditions = sorted([cid for cid in master_ids if cid not in win_conditions])
 
     playstyle_tag_counts = Counter()
-    for tags in CHAMPION_PLAYSTYLES.values():
+    for tags in champion_playstyles.values():
         if isinstance(tags, list):
             for t in tags:
                 playstyle_tag_counts[t] += 1
@@ -347,7 +346,7 @@ def analyze_enricher_curation():
 
 def analyze_champions():
     """Execute complete champion EDA aligned with Processor components."""
-    log(TAG, "Starting champion analysis aligned with ChampionMerger, SpellAnalyzer, and Enricher...")
+    log(tag, "Starting champion analysis aligned with ChampionMerger, SpellAnalyzer, and Enricher...")
 
     merge_info = analyze_champion_merge_inputs()
     stats_info = analyze_champion_stats_and_attributes()
@@ -361,7 +360,7 @@ def analyze_champions():
         "enricher_curation": enrich_info,
     }
 
-    log(TAG, f"Analysis complete. Evaluated {merge_info['total_master_champions']} master champions.")
+    log(tag, f"Analysis complete. Evaluated {merge_info['total_master_champions']} master champions.")
     return results
 
 
@@ -375,11 +374,11 @@ def format_champions_report(results):
     sections = [
         "## 1. Phân Tích Dữ Liệu Tướng (Champion Processing Pipeline)",
         "",
-        "### 1.1 Champion Merger: Nguồn Dữ Liệu & Cơ Chế Hợp Nhất",
+        "### 1.1 Champion Merger: Nguồn Dữ Liệu and Cơ Chế Hợp Nhất",
         f"- **Tổng số tướng Master Roster**: {merge_info['total_master_champions']} tướng (DDragon + non-Jade CDragon)",
         f"- **Độ phủ Meraki Stats**: {merge_info['stats_resolution']['from_meraki_count']}/{merge_info['total_master_champions']} tướng ({merge_info['stats_resolution']['from_meraki_pct']}%)",
         f"- **Số tướng dùng Fallback DDragon Stats**: {merge_info['stats_resolution']['fallback_ddragon_count']} ({', '.join(merge_info['stats_resolution']['fallback_ddragon_champions']) if merge_info['stats_resolution']['fallback_ddragon_champions'] else 'Không có'})",
-        f"- **Độ phủ CDragon Tactical & Playstyle Info**: {merge_info['cd_metadata_coverage']['has_tactical_info']}/{merge_info['total_master_champions']} tướng ({merge_info['cd_metadata_coverage']['tactical_info_pct']}%)",
+        f"- **Độ phủ CDragon Tactical and Playstyle Info**: {merge_info['cd_metadata_coverage']['has_tactical_info']}/{merge_info['total_master_champions']} tướng ({merge_info['cd_metadata_coverage']['tactical_info_pct']}%)",
         "",
     ]
 
@@ -393,7 +392,7 @@ def format_champions_report(results):
     sections.append("")
 
     # Stats distribution table
-    sections.append("### 1.2 Phân Bố Chỉ Số Cơ Bản & Tăng Trưởng (Stats & Growth Formulas)")
+    sections.append("### 1.2 Phân Bố Chỉ Số Cơ Bản and Tăng Trưởng (Stats and Growth Formulas)")
     stat_rows = []
     for k, info in stats_info["stats_distribution"].items():
         m = info["metrics"]
@@ -411,7 +410,7 @@ def format_champions_report(results):
     sections.append("")
 
     # Spell Analyzer
-    sections.append("### 1.3 Spell Analyzer: Trích Xuất Khống Chế (CC) & Hiệu Ứng Chiêu Thức")
+    sections.append("### 1.3 Spell Analyzer: Trích Xuất Khống Chế (CC) and Hiệu Ứng Chiêu Thức")
     cc_m = spell_info["cc_per_champion_stats"]
     sections.append(f"- **Số lượng loại CC trên mỗi tướng**: Trung bình {cc_m['mean']} (Max: {cc_m['max']}, Min: {cc_m['min']})")
     sections.append(f"- **Tướng thuần sát thương không có CC**: {len(spell_info['champions_without_cc'])} ({', '.join(spell_info['champions_without_cc'][:6])}...)")

@@ -1,5 +1,5 @@
 """
-Data Quality & Cross-Source Consistency Audit Module.
+Data Quality and Cross-Source Consistency Audit Module.
 
 Directly audits the data quality and merge consistency required by all processor pipelines:
 - Schema completeness for ChampionMerger, ItemMerger, and RuneMerger.
@@ -7,7 +7,6 @@ Directly audits the data quality and merge consistency required by all processor
 - Overall Processor Pipeline Readiness Score.
 """
 
-from typing import Any, Dict, List, Optional
 
 from eda.utils import (
     calculate_stats,
@@ -16,7 +15,7 @@ from eda.utils import (
     log,
 )
 
-TAG = "QualityAudit"
+tag = "QualityAudit"
 
 
 def audit_champion_completeness():
@@ -137,7 +136,7 @@ def audit_item_and_rune_completeness():
 
 def audit_data_quality():
     """Execute complete data quality audit across all processor inputs."""
-    log(TAG, "Starting cross-source processor data quality audit...")
+    log(tag, "Starting cross-source processor data quality audit...")
 
     champ_comp = audit_champion_completeness()
     stat_cons = audit_cross_source_stat_consistency()
@@ -157,7 +156,7 @@ def audit_data_quality():
         "overall_processor_readiness_score": readiness_score,
     }
 
-    log(TAG, f"Audit complete. Overall Pipeline Readiness Score: {readiness_score}%")
+    log(tag, f"Audit complete. Overall Pipeline Readiness Score: {readiness_score}%")
     return results
 
 
@@ -168,7 +167,7 @@ def format_quality_report(results):
     score = results["overall_processor_readiness_score"]
 
     sections = [
-        "## 5. Đánh Giá Chất Lượng Dữ Liệu & Độ Sẵn Sàng Pipeline (Data Quality Audit)",
+        "## 5. Đánh Giá Chất Lượng Dữ Liệu and Độ Sẵn Sàng Pipeline (Data Quality Audit)",
         "",
         f"### ⭐ Điểm Sẵn Sàng Cho Processor Pipeline (Readiness Score): **{score}%**",
         "",

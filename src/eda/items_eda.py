@@ -3,14 +3,13 @@ Items Exploratory Data Analysis (EDA) Module.
 
 Directly analyzes item data according to the processing steps in `ItemMerger`:
 - Filtering logic: `purchasable == True` AND `maps['11'] == True` (Summoner's Rift Map 11).
-- Economy & cost modeling (`cost.total`, `cost.base`, `cost.sell`).
+- Economy and cost modeling (`cost.total`, `cost.base`, `cost.sell`).
 - Stats extractions (`FlatPhysicalDamageMod`, `FlatMagicDamageMod`, `FlatHPPoolMod`, etc.).
-- Tag & category merging (`set(tags + categories)`).
+- Tag and category merging (`set(tags + categories)`).
 - Recipe graphs and item hierarchy (`buildFrom`, `buildInto`, components vs final items).
 """
 
 from collections import Counter
-from typing import Any, Dict, List, Optional
 
 from eda.utils import (
     calculate_stats,
@@ -20,7 +19,7 @@ from eda.utils import (
     log,
 )
 
-TAG = "ItemsEDA"
+tag = "ItemsEDA"
 
 
 def analyze_item_merger_filtering():
@@ -153,7 +152,7 @@ def analyze_item_costs_and_stats(filtered_items):
 
 def analyze_items():
     """Execute complete item EDA aligned with ItemMerger."""
-    log(TAG, "Starting item analysis aligned with ItemMerger...")
+    log(tag, "Starting item analysis aligned with ItemMerger...")
 
     filter_res = analyze_item_merger_filtering()
     costs_and_stats = analyze_item_costs_and_stats(filter_res["retained_items"])
@@ -163,7 +162,7 @@ def analyze_items():
         "costs_and_stats": costs_and_stats,
     }
 
-    log(TAG, f"Analysis complete. Evaluated {filter_res['retained_count']} items retained after Map 11 filter.")
+    log(tag, f"Analysis complete. Evaluated {filter_res['retained_count']} items retained after Map 11 filter.")
     return results
 
 
@@ -175,7 +174,7 @@ def format_items_report(results):
     sections = [
         "## 2. Phân Tích Dữ Liệu Trang Bị (Item Processing Pipeline)",
         "",
-        "### 2.1 Item Merger: Mô Phỏng Bộ Lọc Cửa Hàng & Bản Đồ Summoner's Rift (Map 11)",
+        "### 2.1 Item Merger: Mô Phỏng Bộ Lọc Cửa Hàng and Bản Đồ Summoner's Rift (Map 11)",
         f"- **Tổng số bản ghi trang bị thô**: {flt['total_raw_items']}",
         f"- **Số trang bị được giữ lại sau lọc**: {flt['retained_count']} ({flt['retained_pct']}%)",
         f"- **Số bản ghi bị loại bỏ**: {flt['filtered_non_purchasable']} (Không mua được) | {flt['filtered_non_map11']} (Không thuộc Map 11 SR / Chế độ khác)",

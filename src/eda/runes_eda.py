@@ -1,5 +1,5 @@
 """
-Runes & Perks Exploratory Data Analysis (EDA) Module.
+Runes and Perks Exploratory Data Analysis (EDA) Module.
 
 Directly analyzes rune data according to the processing steps in `RuneMerger`:
 - Structuring raw DDragon runesReforged into `byId` (flat map) and `byTree` (5 trees).
@@ -9,7 +9,6 @@ Directly analyzes rune data according to the processing steps in `RuneMerger`:
 
 import re
 from collections import Counter
-from typing import Any, Dict, List, Optional
 
 from eda.utils import (
     calculate_stats,
@@ -19,7 +18,7 @@ from eda.utils import (
     log,
 )
 
-TAG = "RunesEDA"
+tag = "RunesEDA"
 
 
 def strip_html_tags(text):
@@ -110,7 +109,7 @@ def analyze_rune_merger_structure():
 
 def analyze_runes():
     """Execute complete rune EDA aligned with RuneMerger."""
-    log(TAG, "Starting runes analysis aligned with RuneMerger...")
+    log(tag, "Starting runes analysis aligned with RuneMerger...")
 
     structure_info = analyze_rune_merger_structure()
 
@@ -118,7 +117,7 @@ def analyze_runes():
         "structure": structure_info,
     }
 
-    log(TAG, f"Analysis complete. Evaluated {structure_info['total_runes_flat']} runes across {structure_info['total_trees']} trees.")
+    log(tag, f"Analysis complete. Evaluated {structure_info['total_runes_flat']} runes across {structure_info['total_trees']} trees.")
     return results
 
 
@@ -129,7 +128,7 @@ def format_runes_report(results):
     sections = [
         "## 3. Phân Tích Dữ Liệu Bảng Ngọc (Rune Processing Pipeline)",
         "",
-        "### 3.1 Rune Merger: Cấu Trúc Bảng Ngọc byTree & byId",
+        "### 3.1 Rune Merger: Cấu Trúc Bảng Ngọc byTree and byId",
         f"- **Tổng số hệ ngọc chính (Trees)**: {st['total_trees']}",
         f"- **Tổng số ngọc siêu cấp (Keystones - Slot 0)**: {st['total_keystones']}",
         f"- **Tổng số ngọc sơ cấp (Minor Runes - Slots 1, 2, 3)**: {st['total_minor_runes']}",
@@ -145,10 +144,10 @@ def format_runes_report(results):
     sections.append(format_table(["Hệ Ngọc", "Ngọc Siêu Cấp", "Ngọc Sơ Cấp", "Tổng Số"], tree_rows))
     sections.append("")
 
-    # Text & Keywords
+    # Text and Keywords
     s_m = st["short_desc_stats"]
     l_m = st["long_desc_stats"]
-    sections.append("### 3.2 Phân Tích Văn Bản Mô Tả & Cơ Chế Hiệu Ứng")
+    sections.append("### 3.2 Phân Tích Văn Bản Mô Tả and Cơ Chế Hiệu Ứng")
     sections.append(f"- **Độ dài mô tả ngắn (Short Desc)**: Trung bình {s_m['mean']} từ (Max: {s_m['max']} từ)")
     sections.append(f"- **Độ dài mô tả chi tiết (Long Desc)**: Trung bình {l_m['mean']} từ (Max: {l_m['max']} từ)")
     sections.append("")

@@ -11,19 +11,18 @@ All generated plots are saved to the `src/eda/output/plots/` directory.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from eda.utils import (
-    PLOTS_DIR,
+    plots_dir,
     ensure_eda_dirs,
     load_raw_json,
     log,
 )
 
-TAG = "Visualizer"
+tag = "Visualizer"
 
 
-def _setup_plot_style(plt):
+def setup_plot_style(plt):
     """Apply clean, modern dark aesthetic style to matplotlib figures."""
     plt.style.use("seaborn-v0_8-darkgrid" if "seaborn-v0_8-darkgrid" in plt.style.available else "default")
     plt.rcParams.update({
@@ -42,7 +41,7 @@ def plot_champion_roles(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         ddragon = load_raw_json("ddragon", "champions.json") or {}
         roles = [c.get("tags", ["Unknown"])[0] for c in ddragon.values() if c.get("tags")]
@@ -69,7 +68,7 @@ def plot_champion_roles(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate champion roles plot: {e}")
+        log(tag, f"Could not generate champion roles plot: {e}")
         return None
 
 
@@ -78,7 +77,7 @@ def plot_champion_attack_types(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         meraki = load_raw_json("meraki", "champions.json") or {}
         atk_types = [c.get("attackType", "UNKNOWN") for c in meraki.values() if c.get("attackType")]
@@ -117,7 +116,7 @@ def plot_champion_attack_types(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate attack types plot: {e}")
+        log(tag, f"Could not generate attack types plot: {e}")
         return None
 
 
@@ -126,7 +125,7 @@ def plot_champion_stats_boxplots(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         ddragon = load_raw_json("ddragon", "champions.json") or {}
         hps = [c["stats"]["hp"] for c in ddragon.values() if "stats" in c and "hp" in c["stats"]]
@@ -153,7 +152,7 @@ def plot_champion_stats_boxplots(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate stats boxplots: {e}")
+        log(tag, f"Could not generate stats boxplots: {e}")
         return None
 
 
@@ -162,7 +161,7 @@ def plot_item_gold_distribution(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         items = load_raw_json("ddragon", "items.json") or {}
         costs = [
@@ -182,7 +181,7 @@ def plot_item_gold_distribution(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate item gold plot: {e}")
+        log(tag, f"Could not generate item gold plot: {e}")
         return None
 
 
@@ -191,7 +190,7 @@ def plot_lore_factions(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         lore = load_raw_json("lore", "lore.json") or {}
         regions = [
@@ -207,7 +206,7 @@ def plot_lore_factions(output_dir):
 
         fig, ax = plt.subplots(figsize = (9, 7))
         bars = ax.barh(names, vals, color = "#16A085", edgecolor = "#1ABC9C")
-        ax.set_title("Champions by Runeterra Region & Faction", fontweight = "bold", pad = 15)
+        ax.set_title("Champions by Runeterra Region and Faction", fontweight = "bold", pad = 15)
         ax.set_xlabel("Number of Champions")
 
         for bar in bars:
@@ -219,7 +218,7 @@ def plot_lore_factions(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate lore factions plot: {e}")
+        log(tag, f"Could not generate lore factions plot: {e}")
         return None
 
 
@@ -228,7 +227,7 @@ def plot_lore_bio_lengths(output_dir):
     try:
         import matplotlib.pyplot as plt
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         lore = load_raw_json("lore", "lore.json") or {}
         words = [len(c.get("lore", "").split()) for c in lore.values() if c.get("lore")]
@@ -244,7 +243,7 @@ def plot_lore_bio_lengths(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate bio lengths plot: {e}")
+        log(tag, f"Could not generate bio lengths plot: {e}")
         return None
 
 
@@ -254,7 +253,7 @@ def plot_spell_cc_effects(output_dir):
         import matplotlib.pyplot as plt
         from eda.champions_eda import analyze_spell_analyzer_extraction
 
-        _setup_plot_style(plt)
+        setup_plot_style(plt)
 
         sim = analyze_spell_analyzer_extraction()
         cc_data = sim["cc_types_distribution"][:6]
@@ -287,17 +286,17 @@ def plot_spell_cc_effects(output_dir):
         plt.close(fig)
         return target
     except Exception as e:
-        log(TAG, f"Could not generate CC and effects plot: {e}")
+        log(tag, f"Could not generate CC and effects plot: {e}")
         return None
 
 
 def generate_all_plots(output_dir = None):
     """Generate and save all exploratory data visualization charts."""
     ensure_eda_dirs()
-    target_dir = output_dir or PLOTS_DIR
+    target_dir = output_dir or plots_dir
     target_dir.mkdir(parents = True, exist_ok = True)
 
-    log(TAG, f"Generating statistical plots to {target_dir}...")
+    log(tag, f"Generating statistical plots to {target_dir}...")
     generated_plots = []
 
     plots_funcs = [
@@ -307,14 +306,14 @@ def generate_all_plots(output_dir = None):
         ("Item Gold Distribution", plot_item_gold_distribution),
         ("Lore Factions", plot_lore_factions),
         ("Lore Bio Lengths", plot_lore_bio_lengths),
-        ("Processor CC & Effects", plot_spell_cc_effects),
+        ("Processor CC and Effects", plot_spell_cc_effects),
     ]
 
     for label, fn in plots_funcs:
         p = fn(target_dir)
         if p and p.exists():
             generated_plots.append(p)
-            log(TAG, f" Generated {label} -> {p.name}")
+            log(tag, f" Generated {label} -> {p.name}")
 
-    log(TAG, f"Plot generation finished. Created {len(generated_plots)} visual charts.")
+    log(tag, f"Plot generation finished. Created {len(generated_plots)} visual charts.")
     return generated_plots

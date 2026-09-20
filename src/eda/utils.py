@@ -11,27 +11,25 @@ Provides common helper functions across EDA modules:
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Base Directory Resolution
-EDA_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = EDA_DIR.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-RAW_DIR = SRC_DIR / "collectors" / "raw"
-OUTPUT_DIR = EDA_DIR / "output"
-PLOTS_DIR = OUTPUT_DIR / "plots"
+eda_dir = Path(__file__).resolve().parent
+project_root = eda_dir.parent.parent
+src_dir = project_root / "src"
+raw_dir = src_dir / "collectors" / "raw"
+output_dir = eda_dir / "output"
+plots_dir = output_dir / "plots"
 
 
 def ensure_eda_dirs():
     """Ensure eda output and plot directories exist."""
-    OUTPUT_DIR.mkdir(parents = True, exist_ok = True)
-    PLOTS_DIR.mkdir(parents = True, exist_ok = True)
+    output_dir.mkdir(parents = True, exist_ok = True)
+    plots_dir.mkdir(parents = True, exist_ok = True)
 
 
 def log(tag, message):
     """Print a standardized log message with an EDA tag prefix."""
     print(f"[{tag}] {message}")
-
 
 
 def load_raw_json(source, filename):
@@ -45,7 +43,7 @@ def load_raw_json(source, filename):
     Returns:
         Loaded JSON structure (dict/list) or None if file not found.
     """
-    filepath = RAW_DIR / source / filename
+    filepath = raw_dir / source / filename
     if not filepath.exists():
         log("Loader", f"Warning: File not found at {filepath}")
         return None
@@ -65,7 +63,7 @@ def load_all_universe_files():
     Returns:
         Dictionary mapping champion slug/id to parsed JSON content.
     """
-    universe_dir = RAW_DIR / "lore" / "universe"
+    universe_dir = raw_dir / "lore" / "universe"
     results = {}
     if not universe_dir.exists():
         log("Loader", f"Universe directory not found at {universe_dir}")
@@ -80,7 +78,6 @@ def load_all_universe_files():
             log("Loader", f"Error reading universe file {file_path.name}: {e}")
 
     return results
-
 
 
 def calculate_stats(numbers):
@@ -173,11 +170,10 @@ def format_table(headers, rows):
     return "\n".join([header_line, separator_line] + row_lines)
 
 
-
 def save_report_markdown(content, filename = "eda_report.md"):
     """Save formatted markdown analysis report to eda output directory."""
     ensure_eda_dirs()
-    target_path = OUTPUT_DIR / filename
+    target_path = output_dir / filename
     with open(target_path, "w", encoding = "utf-8") as f:
         f.write(content)
     log("Report", f"Saved full markdown report to {target_path}")
@@ -187,7 +183,7 @@ def save_report_markdown(content, filename = "eda_report.md"):
 def save_summary_json(data, filename = "eda_summary.json"):
     """Save structured analysis summary to eda output directory in JSON format."""
     ensure_eda_dirs()
-    target_path = OUTPUT_DIR / filename
+    target_path = output_dir / filename
     with open(target_path, "w", encoding = "utf-8") as f:
         json.dump(data, f, indent = 2, ensure_ascii = False)
     log("Report", f"Saved JSON summary to {target_path}")

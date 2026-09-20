@@ -1,17 +1,17 @@
 """
-Main EDA Runner & Report Generator.
+Main EDA Runner and Report Generator.
 
 Orchestrates and executes exploratory data analysis across all LoL raw datasets:
 1. Champions EDA (DDragon, CDragon, Meraki, Lore)
 2. Items EDA (DDragon, CDragon)
 3. Runes EDA (DDragon Runes Reforged)
-4. Lore & Universe EDA (Regions, Bios, Social graph)
-5. Cross-source Data Quality & Consistency Audit
-6. Visualization & Plot Generation
+4. Lore and Universe EDA (Regions, Bios, Social graph)
+5. Cross-source Data Quality and Consistency Audit
+6. Visualization and Plot Generation
 
 Usage:
-    python src/eda/main.py             # Run all EDA analyses & generate reports
-    python src/eda/main.py --all       # Run all EDA analyses & generate reports
+    python src/eda/main.py             # Run all EDA analyses and generate reports
+    python src/eda/main.py --all       # Run all EDA analyses and generate reports
     python src/eda/main.py --champions # Run only champions analysis
     python src/eda/main.py --items     # Run only items analysis
     python src/eda/main.py --runes     # Run only runes analysis
@@ -33,10 +33,10 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # Add project root to sys.path if run directly
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+project_root = Path(__file__).resolve().parent.parent.parent
+src_dir = project_root / "src"
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from eda.champions_eda import analyze_champions, format_champions_report
 from eda.items_eda import analyze_items, format_items_report
@@ -84,7 +84,7 @@ def run_all_eda(save_reports = True, make_plots = True):
     print(f"Items EDA finished in {time.time() - t0:.2f}s")
 
     # 3. Runes Analysis (RuneMerger)
-    print("\n[3/6] Analyzing Runes & Perks Data (DDragon)...")
+    print("\n[3/6] Analyzing Runes and Perks Data (DDragon)...")
     t0 = time.time()
     rune_res = analyze_runes()
     results["runes"] = rune_res
@@ -93,7 +93,7 @@ def run_all_eda(save_reports = True, make_plots = True):
     print(f"Runes EDA finished in {time.time() - t0:.2f}s")
 
     # 4. Lore Analysis (ChampionMerger Lore inputs)
-    print("\n[4/6] Analyzing Lore & Universe Data (Bios, Factions, Graph)...")
+    print("\n[4/6] Analyzing Lore and Universe Data (Bios, Factions, Graph)...")
     t0 = time.time()
     lore_res = analyze_lore()
     results["lore"] = lore_res
@@ -102,7 +102,7 @@ def run_all_eda(save_reports = True, make_plots = True):
     print(f"Lore EDA finished in {time.time() - t0:.2f}s")
 
     # 5. Data Quality Audit (Processor Data Quality)
-    print("\n[5/6] Auditing Data Quality & Pipeline Readiness...")
+    print("\n[5/6] Auditing Data Quality and Pipeline Readiness...")
     t0 = time.time()
     qual_res = audit_data_quality()
     results["quality"] = qual_res
@@ -112,7 +112,7 @@ def run_all_eda(save_reports = True, make_plots = True):
 
     # 6. Plot Generation
     if make_plots:
-        print("\n[6/6] Generating Visual Charts & Plots...")
+        print("\n[6/6] Generating Visual Charts and Plots...")
         t0 = time.time()
         plots = generate_all_plots()
         results["plots_generated"] = [str(p.name) for p in plots]
@@ -132,7 +132,7 @@ def run_all_eda(save_reports = True, make_plots = True):
 
 def main():
     parser = argparse.ArgumentParser(description = "LoL Knowledge Bot - Raw Data EDA Runner")
-    parser.add_argument("--all", action = "store_true", help = "Run full EDA pipeline and save reports & plots (default)")
+    parser.add_argument("--all", action = "store_true", help = "Run full EDA pipeline and save reports and plots (default)")
     parser.add_argument("--champions", action = "store_true", help = "Run only champions EDA")
     parser.add_argument("--items", action = "store_true", help = "Run only items EDA")
     parser.add_argument("--runes", action = "store_true", help = "Run only runes EDA")
@@ -155,32 +155,32 @@ def main():
     start_time = time.time()
 
     if args.champions:
-        print("\n--- Champions EDA ---")
+        print("\nChampions EDA")
         res = analyze_champions()
         print(format_champions_report(res))
 
     if args.items:
-        print("\n--- Items EDA ---")
+        print("\nItems EDA")
         res = analyze_items()
         print(format_items_report(res))
 
     if args.runes:
-        print("\n--- Runes EDA ---")
+        print("\nRunes EDA")
         res = analyze_runes()
         print(format_runes_report(res))
 
     if args.lore:
-        print("\n--- Lore EDA ---")
+        print("\nLore EDA")
         res = analyze_lore()
         print(format_lore_report(res))
 
     if args.quality:
-        print("\n--- Data Quality Audit ---")
+        print("\nData Quality Audit")
         res = audit_data_quality()
         print(format_quality_report(res))
 
     if args.plots:
-        print("\n--- Generating Plots ---")
+        print("\nGenerating Plots")
         generate_all_plots()
 
     elapsed = time.time() - start_time
