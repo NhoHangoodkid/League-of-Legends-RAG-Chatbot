@@ -2,9 +2,7 @@
 
 A production-grade **Hybrid GraphRAG** tactical coach and conversational assistant for **League of Legends**, combining **Neo4j Knowledge Graph**, **fine-tuned LoRA dense retrieval (FAISS)**, **cross-encoder neural re-ranking**, and **multi-store persistence** behind a sleek **Void Glassmorphism UI**.
 
-<p align="center">
-  <img src="assets/demo.gif" alt="League of Legends Hybrid GraphRAG Assistant Demo" width="100%" />
-</p>
+![League of Legends Hybrid GraphRAG Assistant Demo](./assets/demo.gif)
 
 ---
 
