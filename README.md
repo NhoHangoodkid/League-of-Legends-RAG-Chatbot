@@ -8,7 +8,7 @@ A production-grade **Hybrid GraphRAG** tactical coach and conversational assista
 
 ## 🛠️ Tools & Technologies Used
 
-The assistant is built on a high-performance, modular AI & Data ecosystem:
+The assistant is built on modular AI & Data ecosystems:
 
 * **LLM Inference**: **[Ollama](https://ollama.com/)** running **Qwen 2.5 / 3 4B** locally for fast, privacy-preserving tactical reasoning and conversational synthesis.
 * **Knowledge Graph**: **[Neo4j](https://neo4j.com/)** with **Cypher** queries to traverse complex multi-hop relationships (champion counters, duo synergies, item builds, and team composition dynamics).
