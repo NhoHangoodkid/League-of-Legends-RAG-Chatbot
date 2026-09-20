@@ -15,14 +15,14 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from rag.vector.embeddings import EmbeddingModel, get_embedding_model
 from rag.vector.store import VectorStore
 
-DEFAULT_INDEX_DIR = SRC_DIR / "data" / "vector_index"
+default_index_dir = src_dir / "data" / "vector_index"
 
 
 class VectorRetriever:
@@ -36,7 +36,7 @@ class VectorRetriever:
     4. Return standardized context dicts
     """
 
-    def __init__(self, vector_store=None, embedding_model=None, index_dir=str(DEFAULT_INDEX_DIR)):
+    def __init__(self, vector_store=None, embedding_model=None, index_dir=str(default_index_dir)):
         self.embedding_model = embedding_model or get_embedding_model()
 
         if vector_store:
@@ -51,7 +51,7 @@ class VectorRetriever:
             else:
                 print(f"[VectorRetriever] WARNING: No index at {index_dir}. Run indexer first.")
 
-    def retrieve(self, query, top_k=10, entity_type=None, chunk_type=None, entity_name=None, preferred_chunk_type=None):
+    def retrieve(self, query, top_k = 10, entity_type = None, chunk_type = None, entity_name = None, preferred_chunk_type = None, excluded_chunk_types = None):
         """Retrieve relevant chunks via semantic similarity."""
         if len(self.store) == 0:
             return []
@@ -59,11 +59,13 @@ class VectorRetriever:
         query_embedding = self.embedding_model.encode_query(query)
 
         filter_fn = None
-        if entity_type or chunk_type:
+        if entity_type or chunk_type or excluded_chunk_types:
             def filter_fn(meta):
                 if entity_type and meta.get("entity_type") != entity_type:
                     return False
                 if chunk_type and meta.get("chunk_type") != chunk_type:
+                    return False
+                if excluded_chunk_types and meta.get("chunk_type") in excluded_chunk_types:
                     return False
                 return True
 
@@ -95,7 +97,7 @@ class VectorRetriever:
         contexts.sort(key=lambda x: x["score"], reverse=True)
         return contexts[:top_k]
 
-    def retrieve_for_entity(self, query, entity_name, top_k=5):
+    def retrieve_for_entity(self, query, entity_name, top_k = 5):
         """Retrieve chunks specifically about an entity, boosting exact matches."""
         if len(self.store) == 0:
             return []

@@ -16,9 +16,9 @@ import sys
 from pathlib import Path
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from rag.graph.store import Neo4jStore, get_graph_store
 from rag.retriever.graph_retriever import GraphRetriever
@@ -28,7 +28,7 @@ from rag.retriever.reranker import CrossEncoderReranker
 from rag.vector.embeddings import EmbeddingModel, get_embedding_model
 from rag.vector.store import VectorStore
 
-DEFAULT_INDEX_DIR = SRC_DIR / "data" / "vector_index"
+default_index_dir = src_dir / "data" / "vector_index"
 
 
 class RAGPipeline:
@@ -41,7 +41,7 @@ class RAGPipeline:
         Query -> [Vector Retriever] -+
     """
 
-    def __init__(self, graph_store=None, embedding_model=None, vector_store=None, index_dir=str(DEFAULT_INDEX_DIR), enable_graph=True, enable_vector=True, enable_reranker=True, rrf_k=60):
+    def __init__(self, graph_store=None, embedding_model=None, vector_store=None, index_dir=str(default_index_dir), enable_graph = True, enable_vector = True, enable_reranker = True, rrf_k=60):
         self.enable_graph = enable_graph
         self.enable_vector = enable_vector
         self.enable_reranker = enable_reranker
@@ -98,7 +98,7 @@ class RAGPipeline:
             except Exception as e:
                 print(f"[RAGPipeline] Re-ranker: DISABLED ({e})")
 
-    def retrieve(self, query, entities=None, intent=None, graph_top_k=10, vector_top_k=10, rerank_top_k=5):
+    def retrieve(self, query, entities = None, intent = None, graph_top_k = 10, vector_top_k = 10, rerank_top_k = 5):
         """Full RAG retrieval pipeline: Hybrid retrieval + Re-ranking."""
         candidates = self.hybrid.retrieve(
             query=query,
@@ -128,17 +128,44 @@ class RAGPipeline:
         return candidates
 
     def format_context_for_llm(self, contexts):
-        """Format retrieved contexts into a single string for LLM consumption."""
+        """Format retrieved contexts into structured sections for LLM consumption."""
         if not contexts:
-            return "Không tìm thấy thông tin liên quan."
+            return ""
 
-        parts = []
-        for i, ctx in enumerate(contexts, 1):
-            source = ctx.get("source", "unknown")
-            text = ctx.get("text", "")
-            parts.append(f"[Nguồn {i} — {source}]\n{text}")
+        graph_parts = []
+        vector_parts = []
+        other_parts = []
 
-        return "\n\n".join(parts)
+        for ctx in contexts:
+            source = ctx.get("source", "knowledge_base")
+            text = ctx.get("text", "").strip()
+            if not text:
+                continue
+
+            meta = ctx.get("metadata", {})
+            meta_str = ""
+            if meta and isinstance(meta, dict):
+                meta_items = [f"{k}: {v}" for k, v in meta.items() if k in ("chunk_type", "entity_name", "direction", "champion")]
+                if meta_items:
+                    meta_str = f" ({', '.join(meta_items)})"
+
+            entry = f"[{source}{meta_str}]\n{text}"
+            if source.startswith("graph:"):
+                graph_parts.append(entry)
+            elif source.startswith("vector:"):
+                vector_parts.append(entry)
+            else:
+                other_parts.append(entry)
+
+        sections = []
+        if graph_parts:
+            sections.append("=== KNOWLEDGE GRAPH (RELATIONSHIPS and STRUCTURED FACTS) ===\n" + "\n\n".join(graph_parts))
+        if vector_parts:
+            sections.append("=== GAMEPLAY and LORE DOCUMENTS (VECTOR RETRIEVAL) ===\n" + "\n\n".join(vector_parts))
+        if other_parts:
+            sections.append("=== ADDITIONAL KNOWLEDGE BASE PASSAGES ===\n" + "\n\n".join(other_parts))
+
+        return "\n\n".join(sections)
 
     def get_status(self):
         """Return pipeline component status."""

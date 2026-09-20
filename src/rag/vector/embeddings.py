@@ -15,12 +15,12 @@ import torch
 from sentence_transformers import SentenceTransformer
 
 # BGE models require a query instruction prefix for asymmetric retrieval
-BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+bge_query_instruction = "Represent this sentence for searching relevant passages: "
 
 # Default model
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
-DEFAULT_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-DEFAULT_DIMENSION = 384
+src_dir = Path(__file__).resolve().parent.parent.parent
+default_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+default_dimension = 384
 
 
 class EmbeddingModel:
@@ -35,10 +35,10 @@ class EmbeddingModel:
     - L2 normalization for cosine similarity
     """
 
-    def __init__(self, model_name=DEFAULT_MODEL, lora_path=None, device=None, normalize=True, use_lora=True):
+    def __init__(self, model_name = default_model, lora_path = None, device = None, normalize = True, use_lora = True):
         self.model_name = model_name
         self.normalize = normalize
-        self.dimension = DEFAULT_DIMENSION
+        self.dimension = default_dimension
 
         # Auto-detect device
         if device is None:
@@ -52,7 +52,7 @@ class EmbeddingModel:
         # Load model
         print(f"[EmbeddingModel] Loading {model_name} on {self.device}...")
         self.model = SentenceTransformer(model_name, device=self.device)
-        self.dimension = self.model.get_sentence_embedding_dimension()
+        self.dimension = self.model.get_embedding_dimension() if hasattr(self.model, "get_embedding_dimension") else self.model.get_sentence_embedding_dimension()
         print(f"[EmbeddingModel] Loaded. Dimension: {self.dimension}, Device: {self.device}")
 
         # Auto-discover and load LoRA adapter if present
@@ -60,9 +60,9 @@ class EmbeddingModel:
             resolved_lora_path = lora_path
             if not resolved_lora_path:
                 candidates = [
-                    SRC_DIR / "training" / "lora_model",
-                    SRC_DIR / "training" / "lora_embedding",
-                    SRC_DIR / "models" / "lora_embedding",
+                    src_dir / "training" / "lora_model",
+                    src_dir / "training" / "lora_embedding",
+                    src_dir / "models" / "lora_embedding",
                 ]
                 for cand in candidates:
                     if cand.exists() and (cand / "adapter_config.json").exists():
@@ -72,7 +72,7 @@ class EmbeddingModel:
             if resolved_lora_path and Path(resolved_lora_path).exists():
                 self.load_lora_adapter(resolved_lora_path)
 
-    def encode(self, texts, batch_size=64, show_progress=False):
+    def encode(self, texts, batch_size = 64, show_progress = False):
         """
         Encode texts (passages/documents) to dense vectors.
 
@@ -92,7 +92,7 @@ class EmbeddingModel:
 
         return embeddings
 
-    def encode_query(self, query, batch_size=32):
+    def encode_query(self, query, batch_size = 32):
         """
         Encode queries with instruction prefix (for asymmetric retrieval).
 
@@ -106,7 +106,7 @@ class EmbeddingModel:
 
         # Add BGE instruction prefix
         if self.is_bge:
-            queries = [BGE_QUERY_INSTRUCTION + q for q in queries]
+            queries = [bge_query_instruction + q for q in queries]
 
         embeddings = self.model.encode(
             queries,
@@ -162,7 +162,7 @@ class EmbeddingModel:
 embedding_instance = None
 
 
-def get_embedding_model(model_name=DEFAULT_MODEL, lora_path=None):
+def get_embedding_model(model_name = default_model, lora_path = None):
     """Get or create singleton EmbeddingModel instance."""
     global embedding_instance
     if embedding_instance is None:

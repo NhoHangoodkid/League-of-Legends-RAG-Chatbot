@@ -9,14 +9,14 @@ import sys
 from pathlib import Path
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from rag.retriever.graph_retriever import GraphRetriever
 from rag.retriever.vector_retriever import VectorRetriever
 
-INTENT_CHUNK_TYPES = {
+intent_chunk_types = {
     "COUNTER_QUERY": "counter",
     "SYNERGY_QUERY": "synergy",
     "BUILD_QUERY": "build",
@@ -27,19 +27,34 @@ INTENT_CHUNK_TYPES = {
     "ITEM_INFO": "item_info",
     "RUNE_INFO": "rune_info",
     "LORE_QUERY": "lore",
-    "CHAMPION_INFO": "lore",
+    "CHAMPION_INFO": "overview",
+    "CHAMPION_BASE_STATS": "stats",
+    "CHAMPION_STATS_AT_LEVEL": "stats",
+    "CHAMPION_COMPARISON": "overview",
+    "TEAM_COUNTER_ANALYSIS": "composition",
+    "COMPOSITION_QUERY": "composition",
+    "ROLE_COUNTER_PICK": "role_guide",
+    "ROLE_QUERY": "role_guide",
+    "TEAM_COMPOSITION_BUILDING": "composition",
+}
+
+incompatible_chunk_types = {
+    "LORE_QUERY": ["stats", "build"],
+    "COUNTER_QUERY": ["build"],
+    "ABILITY_MECHANIC_QUERY": ["build", "stats", "synergy"],
+    "ROLE_COUNTER_PICK": ["build"],
 }
 
 
 class HybridRetriever:
     """Combines Graph-based and Vector-based retrieval using Reciprocal Rank Fusion."""
 
-    def __init__(self, graph_retriever=None, vector_retriever=None, rrf_k=60):
+    def __init__(self, graph_retriever = None, vector_retriever = None, rrf_k = 60):
         self.graph_retriever = graph_retriever
         self.vector_retriever = vector_retriever
         self.rrf_k = rrf_k
 
-    def retrieve(self, query, entities=None, intent=None, graph_top_k=10, vector_top_k=10, final_top_k=10):
+    def retrieve(self, query, entities = None, intent = None, graph_top_k = 10, vector_top_k = 10, final_top_k = 10):
         """Perform hybrid retrieval with RRF fusion."""
         entities = entities or {}
         graph_results = []
@@ -62,7 +77,8 @@ class HybridRetriever:
                     query=query,
                     top_k=vector_top_k,
                     entity_name=entities.get("champion_name"),
-                    preferred_chunk_type=INTENT_CHUNK_TYPES.get(intent),
+                    preferred_chunk_type=intent_chunk_types.get(intent),
+                    excluded_chunk_types=incompatible_chunk_types.get(intent),
                 )
             except Exception as e:
                 print(f"[HybridRetriever] Vector retrieval error: {e}")
@@ -81,7 +97,7 @@ class HybridRetriever:
 
         return fused[:final_top_k]
 
-    def rrf_fusion(self, ranked_lists, k=60):
+    def rrf_fusion(self, ranked_lists, k = 60):
         """Reciprocal Rank Fusion of multiple ranked result lists."""
         score_map = {}
 

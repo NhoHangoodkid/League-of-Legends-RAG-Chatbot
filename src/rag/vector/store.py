@@ -24,7 +24,7 @@ except ImportError:
 class SearchResult:
     """A single search result from vector retrieval."""
 
-    def __init__(self, chunk_id="", text="", score=0.0, metadata=None):
+    def __init__(self, chunk_id = "", text = "", score = 0.0, metadata = None):
         self.chunk_id = chunk_id
         self.text = text
         self.score = score
@@ -45,7 +45,7 @@ class VectorStore:
     - Save/Load to disk (index + metadata)
     """
 
-    def __init__(self, dimension=384, use_gpu=True):
+    def __init__(self, dimension = 384, use_gpu = True):
         """
         Args:
             dimension: Embedding vector dimension.
@@ -97,7 +97,7 @@ class VectorStore:
         self.index.add(embeddings)
         self.metadata.extend(metadata_list)
 
-    def search(self, query_embedding, top_k=10, filter_fn=None):
+    def search(self, query_embedding, top_k = 10, filter_fn = None):
         """
         Search for nearest neighbors.
 

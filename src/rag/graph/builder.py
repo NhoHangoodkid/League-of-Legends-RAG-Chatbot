@@ -19,14 +19,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
-load_dotenv(SRC_DIR.parent / ".env")
+load_dotenv(src_dir.parent / ".env")
 
 from rag.graph.schema import EdgeType, GraphEdge, GraphNode, NodeType
 from rag.graph.store import Neo4jStore
+from processors.utils import normalize_champion_id
 
 
 class GraphBuilder:
@@ -53,11 +54,11 @@ class GraphBuilder:
 
     def __init__(self, store = None):
         self.store = store or Neo4jStore()
-        self.project_root = SRC_DIR.parent
+        self.project_root = src_dir.parent
 
         # Paths (Fallback)
-        self.processed_dir = SRC_DIR / "processors" / "processed"
-        self.kb_dir = SRC_DIR / "data" / "knowledge_base"
+        self.processed_dir = src_dir / "processors" / "processed"
+        self.kb_dir = src_dir / "data" / "knowledge_base"
 
         # Fallback paths (from legacy lol_chatbot project)
         self.fallback_kb = self.project_root.parent / "lol_chatbot" / "data" / "game_data"
@@ -66,7 +67,7 @@ class GraphBuilder:
         self.nodes = []
         self.edges = []
 
-    def load_from_mongo(self, uri: str = None, db_name: str = None):
+    def load_from_mongo(self, uri = None, db_name = None):
         """
         Load all entities and relationships directly from MongoDB.
         Returns:
@@ -100,7 +101,35 @@ class GraphBuilder:
             }
             runes = {"byId": by_id, "byTree": by_tree}
 
-            counters = {doc["_id"]: doc for doc in db.counters.find()}
+            # Canonicalize counters to 173 champions matching champions.keys()
+            raw_counters = {doc["_id"]: doc for doc in db.counters.find()}
+            canonical_counters = {}
+            for cid, doc in raw_counters.items():
+                c_key = None
+                if cid in champions:
+                    c_key = cid
+                else:
+                    for ch_id, ch_data in champions.items():
+                        if ch_data.get("name") == doc.get("champion") or ch_data.get("name") == cid:
+                            c_key = ch_id
+                            break
+                if c_key:
+                    if c_key not in canonical_counters or ("weakAgainst" in doc and "weakAgainst" not in canonical_counters[c_key]):
+                        c_doc = dict(doc)
+                        c_doc["_id"] = c_key
+                        c_doc["champion_id"] = c_key
+                        c_doc["champion"] = champions[c_key].get("name", c_key)
+                        canonical_counters[c_key] = c_doc
+
+            for cid, doc in champions.items():
+                if cid not in canonical_counters and "counters" in doc and isinstance(doc["counters"], dict):
+                    cnt = dict(doc["counters"])
+                    cnt["_id"] = cid
+                    cnt["champion_id"] = cid
+                    cnt["champion"] = doc.get("name", cid)
+                    canonical_counters[cid] = cnt
+
+            counters = canonical_counters
             synergies = {doc["_id"]: doc for doc in db.synergies.find()}
             builds = {doc["_id"]: doc for doc in db.builds.find()}
 
@@ -112,7 +141,7 @@ class GraphBuilder:
             print(f"[Builder] MongoDB connection/load failed: {e}")
             return None
 
-    def load_data(self, source: str = "mongo"):
+    def load_data(self, source = "mongo"):
         """
         Load data from specified source ('mongo', 'file', 'auto').
         """
@@ -129,7 +158,10 @@ class GraphBuilder:
         champions = self.load_json(self.processed_dir / "champions.json")
         items = self.load_json(self.processed_dir / "items.json")
         runes = self.load_json(self.processed_dir / "runes.json")
-        return champions, items, runes, None, None, None
+        counters = self.load_json(self.processed_dir / "counters.json")
+        synergies = self.load_json(self.processed_dir / "synergies.json")
+        builds = self.load_json(self.processed_dir / "builds.json")
+        return champions, items, runes, counters, synergies, builds
 
     def build(self, clear = False, source = "mongo"):
         """
@@ -159,7 +191,7 @@ class GraphBuilder:
             return
 
         # Phase 1: Build champion nodes + ability nodes + tag nodes
-        print(f"\n[1/6] Building Champion & Ability nodes ({len(champions)} champions)...")
+        print(f"\n[1/6] Building Champion and Ability nodes ({len(champions)} champions)...")
         self.build_champion_nodes(champions)
 
         # Phase 2: Build item nodes
@@ -171,7 +203,7 @@ class GraphBuilder:
         self.build_rune_nodes(runes)
 
         # Phase 4: Build counter/synergy relationships
-        print("\n[4/6] Building Counter & Synergy relationships...")
+        print("\n[4/6] Building Counter and Synergy relationships...")
         self.build_matchup_edges(counters = counters, synergies = synergies)
 
         # Phase 5: Build build-path relationships
@@ -432,19 +464,24 @@ class GraphBuilder:
                 champ_name = data.get("champion") or data.get("champion_id") or data.get("_id", "")
                 champ_id = self.normalize_name(champ_name)
 
-                duos = data.get("synergies", data if isinstance(data, list) else [])
+                duos = data.get("best_duos") or data.get("synergies", data if isinstance(data, list) else [])
                 if isinstance(duos, dict):
-                    duos = duos.get("synergies", [])
+                    duos = duos.get("best_duos") or duos.get("synergies", [])
 
                 for duo in (duos if isinstance(duos, list) else []):
-                    partner_id = self.normalize_name(duo.get("champion", ""))
+                    partner_name = duo.get("partner") or duo.get("champion", "")
+                    partner_id = self.normalize_name(partner_name)
                     if partner_id and champ_id:
                         self.edges.append(GraphEdge(
                             champ_id, partner_id, EdgeType.SYNERGIZES_WITH,
                             properties={
-                                "duo_win_rate": duo.get("duo_win_rate", duo.get("winRate", 0)),
-                                "games": duo.get("games", 0),
-                                "reason": duo.get("reason", ""),
+                                "duo_win_rate": duo.get("win_rate") or duo.get("soloq_winrate") or duo.get("duo_win_rate") or duo.get("winRate", 0),
+                                "games": duo.get("sample_games") or duo.get("soloq_games") or duo.get("games", 0),
+                                "pro_play": duo.get("pro_play", False),
+                                "pro_games": duo.get("pro_games", 0),
+                                "pro_winrate": duo.get("pro_winrate"),
+                                "reason": duo.get("synergy_reason") or duo.get("reason", ""),
+                                "synergy_tag": duo.get("synergy_tag", ""),
                             },
                         ))
                         synergy_count += 1
@@ -597,12 +634,15 @@ class GraphBuilder:
 
     @staticmethod
     def normalize_name(name):
-        """Normalize champion name to canonical ID form (e.g., 'Lee Sin' → 'LeeSin')."""
+        """Normalize champion name to canonical ID form (e.g., 'Lee Sin' → 'LeeSin', 'Wukong' → 'MonkeyKing')."""
         if not name:
             return ""
-        # Remove special chars and spaces to match champion IDs
+        # Use the canonical alias table for known champion names
+        canonical = normalize_champion_id(name.strip())
+        if canonical:
+            return canonical
+        # Fallback: Remove special chars and spaces to match champion IDs
         cleaned = re.sub(r"['\s\-\.]", "", name.strip())
-        # Capitalize first letter of each word
         return cleaned
 
     @staticmethod
@@ -624,8 +664,6 @@ class GraphBuilder:
                 return json.load(f)
         except Exception:
             return {}
-
-
 
 
 def main():

@@ -43,7 +43,7 @@ class EdgeType(Enum):
     HAS_CHUNK = "HAS_CHUNK"
 
 
-CHAMPION_PROPERTIES = [
+champion_properties = [
     "champion_id",
     "name",
     "title",
@@ -56,7 +56,7 @@ CHAMPION_PROPERTIES = [
     "stats_json",
 ]
 
-ABILITY_PROPERTIES = [
+ability_properties = [
     "ability_id",
     "champion_id",
     "key",
@@ -68,7 +68,7 @@ ABILITY_PROPERTIES = [
     "maxrank",
 ]
 
-ITEM_PROPERTIES = [
+item_properties = [
     "item_id",
     "name",
     "description",
@@ -80,7 +80,7 @@ ITEM_PROPERTIES = [
     "image",
 ]
 
-RUNE_PROPERTIES = [
+rune_properties = [
     "rune_id",
     "name",
     "tree",
@@ -92,7 +92,7 @@ RUNE_PROPERTIES = [
 class GraphNode:
     """Represents a node to be inserted into the graph."""
 
-    def __init__(self, node_id, node_type, properties=None):
+    def __init__(self, node_id, node_type, properties = None):
         self.node_id = node_id
         self.node_type = node_type
         self.properties = properties or {}
@@ -104,7 +104,7 @@ class GraphNode:
 class GraphEdge:
     """Represents an edge to be inserted into the graph."""
 
-    def __init__(self, source_id, target_id, edge_type, properties=None):
+    def __init__(self, source_id, target_id, edge_type, properties = None):
         self.source_id = source_id
         self.target_id = target_id
         self.edge_type = edge_type

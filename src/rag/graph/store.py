@@ -9,21 +9,24 @@ import json
 import os
 from contextlib import contextmanager
 
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
 from rag.graph.schema import EdgeType, NodeType, GraphNode, GraphEdge
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "lolbot2024")
-NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+load_dotenv()
+
+neo4j_uri = os.getenv("NEO4J_URI") or os.getenv("neo4j_uri") or "bolt://127.0.0.1:7687"
+neo4j_user = os.getenv("NEO4J_USER") or os.getenv("neo4j_user") or "neo4j"
+neo4j_password = os.getenv("NEO4J_PASSWORD") or os.getenv("neo4j_password") or ""
+neo4j_database = os.getenv("NEO4J_DATABASE") or os.getenv("neo4j_database") or "neo4j"
 
 
 class Neo4jStore:
     """Neo4j-backed Knowledge Graph Store."""
 
-    def __init__(self, uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD, database=NEO4J_DATABASE):
+    def __init__(self, uri = neo4j_uri, user = neo4j_user, password = neo4j_password, database = neo4j_database):
         self.uri = uri
         self.user = user
         self.password = password
@@ -49,7 +52,7 @@ class Neo4jStore:
         except AuthError:
             raise ConnectionError(
                 f"[Neo4jStore] Authentication failed for user '{self.user}'. "
-                "Check NEO4J_USER and NEO4J_PASSWORD environment variables."
+                "Check neo4j_user and neo4j_password environment variables."
             )
 
     def close(self):
@@ -135,8 +138,8 @@ class Neo4jStore:
             sess.run("MATCH (n) DETACH DELETE n")
         print("[Neo4jStore] Database cleared.")
 
-    def bulk_create_nodes(self, nodes, batch_size=500):
-        """Bulk insert nodes using UNWIND for performance."""
+    def bulk_create_nodes(self, nodes, batch_size = 500):
+        """Insert nodes in batches."""
         grouped = {}
         for node in nodes:
             grouped.setdefault(node.node_type, []).append(
@@ -146,17 +149,18 @@ class Neo4jStore:
         with self.session() as sess:
             for node_type, items in grouped.items():
                 label = node_type.value
+                id_key = self.id_key(node_type)
                 for i in range(0, len(items), batch_size):
                     batch = items[i : i + batch_size]
-                    sess.run(
+                    cypher = (
                         f"UNWIND $batch AS props "
-                        f"MERGE (n:{label} {{{self.id_key(node_type)}: props.id}}) "
-                        f"SET n += props",
-                        batch=batch,
+                        f"MERGE (n:{label} {{{id_key}: props.id}}) "
+                        f"SET n += props"
                     )
+                    sess.run(cypher, batch=batch)
                 print(f"  Created {len(items)} {label} nodes")
 
-    def bulk_create_edges(self, edges, batch_size=500):
+    def bulk_create_edges(self, edges, batch_size = 500):
         """Bulk insert edges using UNWIND."""
         grouped = {}
         for edge in edges:
@@ -202,7 +206,7 @@ class Neo4jStore:
                     sess.run(cypher, batch=batch)
                 print(f"  Created {len(items)} {rel_name} edges")
 
-    def get_node(self, node_id, node_type=None):
+    def get_node(self, node_id, node_type = None):
         """Get a single node by ID, optionally filtering by type."""
         with self.session() as sess:
             if node_type:
@@ -224,7 +228,7 @@ class Neo4jStore:
                 return dict(record["n"])
         return None
 
-    def get_neighbors(self, node_id, edge_type=None, direction="out", limit=50):
+    def get_neighbors(self, node_id, edge_type = None, direction = "out", limit = 50):
         """Get neighbors of a node, optionally filtered by edge type and direction."""
         rel_filter = f":{edge_type.value}" if edge_type else ""
 
@@ -234,7 +238,6 @@ class Neo4jStore:
             pattern = f"(a)<-[r{rel_filter}]-(b)"
         else:
             pattern = f"(a)-[r{rel_filter}]-(b)"
-
         cypher = (
             f"MATCH {pattern} "
             f"WHERE a.champion_id = $nid OR a.item_id = $nid "
@@ -254,7 +257,7 @@ class Neo4jStore:
                 })
         return results
 
-    def get_subgraph(self, node_id, max_depth=2, max_nodes=50):
+    def get_subgraph(self, node_id, max_depth = 2, max_nodes = 50):
         """Extract a k-hop subgraph around a node."""
         fallback_cypher = (
             f"MATCH path = (center)-[*1..{max_depth}]-(neighbor) "
@@ -279,7 +282,7 @@ class Neo4jStore:
 
         return {"nodes": [], "edges": []}
 
-    def find_path(self, source_id, target_id, max_depth=4):
+    def find_path(self, source_id, target_id, max_depth = 4):
         """Find shortest path between two nodes."""
         cypher = (
             f"MATCH (a), (b), "

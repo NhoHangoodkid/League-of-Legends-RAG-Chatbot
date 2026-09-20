@@ -16,7 +16,7 @@ class CrossEncoderReranker:
     because they see query and passage together, enabling token-level interaction.
     """
 
-    def __init__(self, model_name="cross-encoder/ms-marco-MiniLM-L-6-v2", device=None):
+    def __init__(self, model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2", device = None):
         self.model_name = model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
@@ -32,7 +32,7 @@ class CrossEncoderReranker:
         self.model = CrossEncoder(self.model_name, device=self.device)
         print(f"[Reranker] Model loaded.")
 
-    def rerank(self, query, candidates, top_k=5, score_key="rerank_score"):
+    def rerank(self, query, candidates, top_k = 5, score_key = "rerank_score"):
         """Re-rank candidate passages using cross-encoder."""
         if not candidates:
             return []

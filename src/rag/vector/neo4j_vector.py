@@ -1,5 +1,5 @@
 """
-Neo4j Vector Store & Ingestion for LoL Knowledge Bot.
+Neo4j Vector Store and Ingestion for LoL Knowledge Bot.
 
 Loads chunk embeddings directly into Neo4j:
 - Creates native Neo4j Vector Index (`chunk_embeddings`) on :Chunk(embedding)
@@ -16,32 +16,32 @@ from pathlib import Path
 import numpy as np
 
 # Ensure src/ is on path
-SRC_DIR = Path(__file__).resolve().parent.parent.parent
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+src_dir = Path(__file__).resolve().parent.parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from rag.graph.store import Neo4jStore, get_graph_store
 
-DEFAULT_INDEX_DIR = SRC_DIR / "data" / "vector_index"
+default_index_dir = src_dir / "data" / "vector_index"
 
 
 class Neo4jVectorStore:
     """Manages vector embeddings and vector index inside Neo4j."""
 
-    INDEX_NAME = "chunk_embeddings"
-    DIMENSION = 384
+    index_name = "chunk_embeddings"
+    dimension = 384
 
-    def __init__(self, store: Neo4jStore = None):
+    def __init__(self, store = None):
         self.store = store or get_graph_store()
 
     def init_vector_index(self):
         """Create native Neo4j Vector Index for :Chunk nodes."""
         cypher = f"""
-        CREATE VECTOR INDEX {self.INDEX_NAME} IF NOT EXISTS
+        CREATE VECTOR INDEX {self.index_name} IF NOT EXISTS
         FOR (c:Chunk) ON (c.embedding)
         OPTIONS {{
           indexConfig: {{
-            `vector.dimensions`: {self.DIMENSION},
+            `vector.dimensions`: {self.dimension},
             `vector.similarity_function`: 'cosine'
           }}
         }}
@@ -55,9 +55,9 @@ class Neo4jVectorStore:
 
             # Create vector index
             sess.run(cypher)
-            print(f"[Neo4jVector] Vector index '{self.INDEX_NAME}' created or verified.")
+            print(f"[Neo4jVector] Vector index '{self.index_name}' created or verified.")
 
-    def load_from_faiss(self, index_dir=str(DEFAULT_INDEX_DIR), batch_size=200):
+    def load_from_faiss(self, index_dir=str(default_index_dir), batch_size = 200):
         """
         Load pre-computed embeddings and metadata from FAISS vector_index
         and insert into Neo4j in batches.
@@ -86,7 +86,7 @@ class Neo4jVectorStore:
 
         return self.ingest_vectors(vectors, metadata_list, batch_size=batch_size)
 
-    def ingest_vectors(self, vectors, metadata_list, batch_size=200):
+    def ingest_vectors(self, vectors, metadata_list, batch_size = 200):
         """Ingest vectors and metadata into Neo4j :Chunk nodes."""
         self.init_vector_index()
 
@@ -154,7 +154,7 @@ class Neo4jVectorStore:
 
         return cnt
 
-    def search(self, query_vector, top_k=10):
+    def search(self, query_vector, top_k = 10):
         """
         Search nearest neighbors using Neo4j Vector Index.
         """
@@ -162,7 +162,7 @@ class Neo4jVectorStore:
             query_vector = [float(x) for x in query_vector.flatten()]
 
         cypher = f"""
-        CALL db.index.vector.queryNodes('{self.INDEX_NAME}', $top_k, $vector)
+        CALL db.index.vector.queryNodes('{self.index_name}', $top_k, $vector)
         YIELD node, score
         RETURN node.chunk_id AS chunk_id,
                node.text AS text,
@@ -190,7 +190,7 @@ class Neo4jVectorStore:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Ingest vector embeddings into Neo4j")
-    parser.add_argument("--index-dir", default=str(DEFAULT_INDEX_DIR), help="Directory of FAISS index")
+    parser.add_argument("--index-dir", default=str(default_index_dir), help="Directory of FAISS index")
     parser.add_argument("--batch-size", type=int, default=250, help="Batch size for Cypher UNWIND")
     parser.add_argument("--test-search", action="store_true", help="Run a test vector search after loading")
     args = parser.parse_args()
