@@ -22,6 +22,20 @@ The assistant is built on a high-performance, modular AI & Data ecosystem:
 
 ---
 
+## 🧠 Relationship & Knowledge Modeling
+
+Rather than relying purely on flat text chunks, the system constructs an **interconnected Knowledge Graph (Neo4j)** and relational matrices from raw multi-source data:
+
+* **Counters & Matchups (`COUNTERS`)**: Models lane advantages, win-rate deltas, and tactical counter reasoning (e.g., range poke advantage, shield-breaking, anti-sustain).
+* **Duo Synergies (`SYNERGIZES_WITH`)**: Maps high-synergy champion pairs (Bot-Support, Mid-Jungle) with complementary mechanics (e.g., CC chaining, engage + AoE burst).
+* **Itemization & Rune Paths (`USES_ITEM`, `USES_RUNE`)**: Links champions to core/situational item builds and rune trees based on playstyles and damage profiles.
+* **Ability & Crowd Control Mechanics (`HAS_ABILITY`, `HAS_CC`)**: Associates spells with scaling formulas, cooldowns, and CC types (Airborne, Stun, Silence).
+* **Composition Counter Matrices (`COUNTERS_COMP`)**: Connects 20 strategic team composition archetypes (Wombo Combo, Poke/Siege, Split Push, Protect Hypercarry) with strategic counter-play dynamics.
+
+This graph-based relationship structure enables **multi-hop Cypher queries**, allowing the assistant to reason across interconnected entities that traditional vector-only RAG misses.
+
+---
+
 ## ⚡ Quick Start
 
 ### 1. Prerequisites
