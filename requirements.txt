@@ -1,0 +1,39 @@
+# Data collection
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+selenium>=4.15.0
+pyyaml>=6.0
+
+# Data processing
+tqdm>=4.66.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+
+# LLM (Qwen 3 4B via Ollama - OpenAI compatible)
+openai>=1.30.0
+httpx>=0.25.0
+
+# Knowledge Graph and Databases
+neo4j>=5.14.0
+pymongo>=4.6.0
+psycopg2-binary>=2.9.9
+
+# Vector Store and Semantic Embeddings
+sentence-transformers>=2.2.2
+faiss-cpu>=1.7.4
+torch>=2.0.0
+transformers>=4.35.0
+numpy>=1.24.0
+
+# LoRA Fine-Tuning
+peft>=0.7.0
+accelerate>=0.25.0
+
+# UI
+streamlit>=1.30.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Testing and Evaluation
+pytest>=7.4.0

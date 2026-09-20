@@ -1,107 +1,57 @@
-# ==========================================
-# Python & Environment
-# ==========================================
+# Python and Environment
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environments
 venv/
 .venv/
 env/
-ENV/
-env.bak/
-venv.bak/
 
-# Environment Variables & Secrets
+# Environment Variables and Secrets
 .env
-.env.local
-.env.*.local
-*.pem
-*.key
+.env.*
+!.env.example
 
-# ==========================================
-# Data & Knowledge Base (Raw, Processed, DBs)
-# ==========================================
+# Data and Datasets
 data/
-data/raw/
-data/processed/
-data/knowledge_base/
-data/vectorstore/
-data/embeddings/
-
-# Data Files & Dumps
+src/data/
+src/processors/processed/
 *.json
+*.jsonl
 *.csv
-*.tsv
 *.parquet
 *.pickle
 *.pkl
-*.sqlite
-*.sqlite3
-*.db
 
-# Vector DBs / Storage Indices
+# Images and Visualizations
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.svg
+plots/
+src/eda/output/plots/
+
+# Models and Vector Databases
+models/
+checkpoints/
 chroma_db/
 faiss_index/
-.qdrant/
-milvus_data/
+lora_model/
+src/training/lora_model/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
 
-# ==========================================
-# Testing, Coverage & Jupyter Notebooks
-# ==========================================
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-.ipynb_checkpoints/
-*-checkpoint.ipynb
-
-# ==========================================
-# IDEs & Code Editors
-# ==========================================
-.vscode/
-.idea/
-*.sublime-workspace
-*.sublime-project
-*.swp
-*.swo
-
-# ==========================================
-# Logs & Temporary Files
-# ==========================================
+# Logs and Temporary Files
 logs/
 *.log
 tmp/
 temp/
 
-# ==========================================
-# Operating System
-# ==========================================
+# IDEs and Operating System
+.vscode/
+.idea/
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-desktop.ini
