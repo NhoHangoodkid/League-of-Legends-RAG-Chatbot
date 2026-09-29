@@ -178,7 +178,10 @@ class LoRAEmbeddingTrainer:
         warmup_steps = int(total_steps * warmup_ratio)
 
         # Calculate evaluation steps: eval 2 times per epoch by default to save time
-        if evaluation_steps is not None and evaluation_steps > 0:
+        if no_eval:
+            fit_eval_steps = None
+            eval_timing_desc = "disabled"
+        elif evaluation_steps is not None and evaluation_steps > 0:
             fit_eval_steps = evaluation_steps
             eval_timing_desc = f"every {fit_eval_steps} steps"
         elif evals_per_epoch and evals_per_epoch > 0:

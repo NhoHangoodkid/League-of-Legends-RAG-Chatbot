@@ -267,6 +267,7 @@ class TrainingDataGenerator:
         self.chunks = []
         self.chunks_by_type = {}
         self.chunks_by_entity = {}
+        self.ability_chunks_by_mechanic = {}
 
     @staticmethod
     def partition_dict(data, r_train = 0.8, r_val = 0.1, seed = 42, group_by_name = False):
@@ -673,33 +674,185 @@ class TrainingDataGenerator:
 
     # Indexing helpers
 
+    @staticmethod
+    def get_ability_mechanics(chunk):
+        """Extract fine-grained combat and crowd-control mechanics from ability chunk text."""
+        txt = chunk.text.lower()
+        # Separate description from metadata lines (cooldown, cost, range, projectile, etc.)
+        meta_split = re.split(r'\b(?:cooldown|cost|range|projectile:)\b', txt, flags=re.I)
+        desc_txt = meta_split[0] if meta_split else txt
+
+        mechs = []
+
+        # 1. Hook / Pull / Drag
+        if re.search(r'\b(?:hook(?:s|ed|ing)?|pull(?:s|ed|ing)?|drag(?:s|ged|ging)?|grab(?:s|bed|bing)?|reel(?:s|ed|ing)?|snag(?:s|ged)?|apprehend|nevermove|rocket grab|dredge line|death sentence|bone skewer)\b', desc_txt) or 'chains and pulls' in desc_txt or 'dragged to the center' in desc_txt:
+            mechs.append("hook_pull")
+
+        # 2. Knockup / Airborne / Suspension / Displacement
+        if re.search(r'\b(?:knock(?:s|ed|ing)?\s+(?:up|airborne|back|aside|into\s+the\s+air)|airborne|suspended|suspends|suspension|flings?|fling|flinging|toss(?:es|ed|ing)?(?:\s+\w+)?\s+into\s+the\s+air|throws?\s+target)\b', desc_txt):
+            mechs.append("knockup_airborne")
+
+        # 3. Dash / Leap / Blink / Mobility
+        if re.search(r'\b(?:dash(?:es|ed|ing)?|leaps?|leaping|blinks?|blinking|lunges?|lunging|rushes?|rushing|slides?|sliding|rolls?|rolling|dives?|diving|vaults?|vaulting|pounce|propels?|propelling|tumble|teleports?|teleporting|rams\s+a\s+target)\b', desc_txt) or any(w in desc_txt for w in ['charges forward', 'carrying her forward', 'carries forward', 'launches himself', 'launches herself', 'jumps after', 'unstoppable force', 'vault breaker', 'charges in a direction', 'lunges at', 'swings on a rope', 'charges to a target', 'dashes to', 'leaps to']):
+            mechs.append("dash_leap")
+
+        # 4. Wind Wall / Projectile Destruction / Interception
+        if any(w in desc_txt for w in ['wind wall', 'blade whirl', 'unbreakable', 'destroy incoming missiles', 'destroy enemy missiles', 'destroys enemy missiles', 'destroying enemy missiles', 'block projectiles', 'blocks projectiles', 'destroy missiles', 'destroys missiles', 'blocks enemy missiles', 'intercepts projectiles', 'intercepts missiles']):
+            mechs.append("wind_wall_block")
+
+        # 5. Stealth / Camouflage / Invisibility
+        if re.search(r'\b(?:stealth|stealthed|invisible|invisibility|camouflaged?|vanishes|unseen|deceive)\b', desc_txt):
+            mechs.append("stealth_invis")
+
+        # 6. Stun
+        if re.search(r'\bstun(?:s|ning|ned)?\b', desc_txt):
+            mechs.append("stun")
+
+        # 7. Root / Snare / Immobilize
+        if (re.search(r'\b(?:root(?:s|ing|ed)?|snares?|snaring|immobiliz(?:es|ing|ed)?|dark binding|tangle)\b', desc_txt) or 'binds in place' in desc_txt) and 'immobilizes himself' not in desc_txt:
+            mechs.append("root_snare")
+
+        # 8. Charm / Taunt / Fear
+        if re.search(r'\b(?:charm(?:s|ing)?|taunt(?:s|ing)?|fears?|fearing|terrify|terrifies|terrified|flee)\b', desc_txt):
+            mechs.append("charm_taunt_fear")
+
+        # 9. Silence / Suppress
+        if re.search(r'\b(?:silence(?:s|d|ing)?|suppress(?:es|ed|ing)?|suppression)\b', desc_txt):
+            mechs.append("silence_suppress")
+
+        # 10. Blind
+        if re.search(r'\b(?:blind(?:s|ed|ing)?|nearsight)\b', desc_txt) and 'blinding speed' not in desc_txt:
+            mechs.append("blind")
+
+        # 11. Shield / Barrier (description only, avoid matching spellshieldable metadata)
+        if re.search(r'\b(?:shields?|shielding|barrier|absorb(?:s)?\s+damage)\b', desc_txt):
+            mechs.append("shield_barrier")
+
+        # 12. Spell Shield
+        if re.search(r'\bspell\s*shield\b', desc_txt) or re.search(r'blocks?\s+(?:a\s+single\s+|the\s+next\s+|an\s+incoming\s+)enemy\s+ability', desc_txt):
+            mechs.append("spellshield")
+
+        # 13. Heal / Regen / Sustain
+        if re.search(r'\b(?:heals?|healing|restores?\s+(?:health|hp)|regenerates?\s+health|life\s*steal|vamp)\b', desc_txt):
+            mechs.append("heal_regen")
+
+        # 14. Execute / Low Health finisher
+        if re.search(r'\b(?:execut(?:es?|ing|ion)|lethal\s+blow|killing\s+blow|below\s+(?:\d+%)?\s*health)\b', desc_txt) or ('missing health' in desc_txt and 'damage' in desc_txt):
+            mechs.append("execute")
+
+        # 15. Revive
+        if re.search(r'\b(?:reviv(?:es?|ing)|resurrect(?:s|ion)?|cheat\s+death)\b', desc_txt):
+            mechs.append("revive")
+
+        # 16. Reset Mechanic
+        if re.search(r'\b(?:resets?|refreshes?\s+(?:the\s+)?cooldown|cooldown\s+is\s+refreshed|cast\s+this\s+spell\s+again)\b', desc_txt):
+            mechs.append("reset_mechanic")
+
+        # 17. Slow CC
+        if re.search(r'\b(?:slow(?:s|ed|ing)?|slowed\s+by)\b', desc_txt):
+            mechs.append("slow_cc")
+
+        # 18. Steroid / Buff
+        if re.search(r'\b(?:gains?\s+(?:attack\s+speed|move\s+speed|movement\s+speed|bonus\s+armor|bonus\s+magic\s+resist)|burst\s+of\s+move\s+speed|empowers?\s+(?:his|her|their|next)\s+attack)\b', desc_txt):
+            mechs.append("steroid_buff")
+
+        return mechs
+
     def index_chunks(self):
-        """Index chunks by type and entity for fast lookup."""
+        """Index chunks by type, entity, and fine-grained ability mechanics for fast lookup."""
         self.chunks_by_type.clear()
         self.chunks_by_entity.clear()
+        self.ability_chunks_by_mechanic.clear()
         for chunk in self.chunks:
             self.chunks_by_type.setdefault(chunk.chunk_type, []).append(chunk)
             self.chunks_by_entity.setdefault(chunk.entity_name.lower(), []).append(chunk)
+            if chunk.chunk_type == "ability":
+                mechs = self.get_ability_mechanics(chunk)
+                chunk.ability_mechanics = mechs
+                for m in mechs:
+                    self.ability_chunks_by_mechanic.setdefault(m, []).append(chunk)
 
     def get_negative(self, positive_chunk, prefer_same_entity = False):
         """
-        Get a high-quality hard negative chunk (non-hardcore, robust, zero false-negative):
-        - If prefer_same_entity=True and positive is an ability: pick a different ability from the SAME champion.
+        Get a high-quality hard negative chunk:
+        - For abilities: 85-90% mechanic-matched hard negative from another champion
+          (e.g., Blitzcrank hook -> Nautilus/Thresh/Pyke hook; Vi dash -> Jarvan/Sejuani/Gragas dash; Yasuo wall -> Samira/Braum wall).
+          Or intra-entity hard negative (different ability of the same champion).
+          Strictly verifies the negative does not mention the target entity.
         - For compositions: pick a composition from a different archetype or champion.
-        - Otherwise, pick a chunk of the same type from a similar entity (matching role when possible),
-          strictly verifying that the negative does not mention the target entity.
+        - Otherwise, pick a chunk of the same type from a similar entity (matching role when possible).
         """
         entity_name = positive_chunk.entity_name.lower()
         chunk_type = positive_chunk.chunk_type
 
-        # 1. Intra-entity hard negative (different ability of the same champion)
-        if prefer_same_entity and chunk_type == "ability":
+        # 1. Ability Hard Negative: Mechanic-matched cross-champion or intra-entity
+        if chunk_type == "ability":
+            pos_mechs = getattr(positive_chunk, "ability_mechanics", None)
+            if pos_mechs is None:
+                pos_mechs = self.get_ability_mechanics(positive_chunk)
+
+            # High priority (85-90%): Same-mechanic ability from a DIFFERENT champion
+            # e.g. hook vs hook, dash vs dash, wind wall vs wind wall
+            if pos_mechs and random.random() < 0.90:
+                priority_order = [
+                    "hook_pull", "wind_wall_block", "spellshield", "blind",
+                    "execute", "reset_mechanic", "revive", "silence_suppress",
+                    "charm_taunt_fear", "knockup_airborne", "stun", "root_snare",
+                    "stealth_invis", "dash_leap", "shield_barrier", "heal_regen",
+                    "slow_cc", "steroid_buff"
+                ]
+
+                # If multiple mechanics match, prioritize abilities sharing at least 2 mechanics
+                if len(pos_mechs) >= 2:
+                    pos_set = set(pos_mechs)
+                    cand_pool = set()
+                    for pm in pos_mechs:
+                        for c in self.ability_chunks_by_mechanic.get(pm, []):
+                            if c.entity_name.lower() != entity_name and entity_name not in c.text.lower():
+                                cand_pool.add(c)
+                    multi_candidates = [
+                        c for c in cand_pool
+                        if len(pos_set.intersection(getattr(c, "ability_mechanics", []))) >= 2
+                    ]
+                    if multi_candidates:
+                        return random.choice(multi_candidates).text
+
+                # Check prioritized mechanic candidates
+                for pm in priority_order:
+                    if pm in pos_mechs:
+                        cand = [
+                            c for c in self.ability_chunks_by_mechanic.get(pm, [])
+                            if c.entity_name.lower() != entity_name and entity_name not in c.text.lower()
+                        ]
+                        if cand:
+                            return random.choice(cand).text
+
+            # Intra-entity hard negative: different ability of the same champion
             same_entity_chunks = [
                 c for c in self.chunks_by_entity.get(entity_name, [])
                 if c.chunk_type == "ability" and c.chunk_id != positive_chunk.chunk_id
             ]
             if same_entity_chunks:
                 return random.choice(same_entity_chunks).text
+
+            # Role-matched ability from another champion
+            pos_role = positive_chunk.metadata.get("role")
+            if pos_role:
+                role_cands = [
+                    c for c in self.chunks_by_type.get("ability", [])
+                    if c.entity_name.lower() != entity_name and entity_name not in c.text.lower()
+                    and c.metadata.get("role") == pos_role
+                ]
+                if role_cands:
+                    return random.choice(role_cands).text
+
+            # Fallback to any other ability chunk not mentioning entity_name
+            other_ability_chunks = [
+                c for c in self.chunks_by_type.get("ability", [])
+                if c.entity_name.lower() != entity_name and entity_name not in c.text.lower()
+            ]
+            if other_ability_chunks:
+                return random.choice(other_ability_chunks).text
 
         # 2. Composition-specific hard negative
         if chunk_type == "composition":
@@ -817,19 +970,67 @@ class TrainingDataGenerator:
             "What are {name}'s base health regen and mana pool values?",
         ]
 
-        combined_overview = champ_overview_en + champ_overview_extra_en
-        combined_stats = champ_stats_en + champ_stats_extra_en
+        # Short keyword queries and conversational inquiries
+        champ_overview_short_en = [
+            "{name} overview",
+            "{name} playstyle and role",
+            "{name} win condition",
+            "{name} scaling power curve",
+            "{name} difficulty rating",
+            "{name} strengths and tactical identity",
+            "{name} damage profile and resource",
+        ]
+
+        champ_overview_conv_en = [
+            "is {name} an early game lane bully or late game carry?",
+            "how does {name} fit into a 5v5 team comp?",
+            "what is the primary win condition when playing {name}?",
+            "is {name} difficult for beginners to learn?",
+            "what kind of playstyle should i focus on when playing {name}?",
+            "is {name} considered a splitpusher or a teamfighter?",
+            "what are the main combat strengths of {name} on Summoner's Rift?",
+        ]
+
+        champ_stats_short_en = [
+            "{name} base stats level 1",
+            "{name} base armor hp",
+            "{name} attack range and ad",
+            "{name} base movement speed",
+            "{name} health scaling growth",
+            "{name} level 1 base durability",
+        ]
+
+        champ_stats_conv_en = [
+            "does {name} start with high base health in lane?",
+            "how does {name}'s armor scale per level compared to other champions?",
+            "is {name}'s level 1 base attack damage good for early trades?",
+            "what are {name}'s defensive base stats when spawning in game?",
+            "how much attack range does {name} have on basic attacks?",
+        ]
+
+        combined_overview = champ_overview_en + champ_overview_extra_en + champ_overview_short_en + champ_overview_conv_en
+        combined_stats = champ_stats_en + champ_stats_extra_en + champ_stats_short_en + champ_stats_conv_en
 
         sample_k_overview = 9 if split_mode == "train" else 6
         sample_k_stats = 6 if split_mode == "train" else 4
 
-        # 1. Champion queries (Overview + Stats)
+        # 1. Champion queries (Overview + Stats + Zero-entity Implicit)
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
             roles = champ.get("roles", [])
             primary_role = roles[0] if roles else "champion"
-            entity_chunks = self.chunks_by_entity.get(name.lower(), [])
+            positions = champ.get("positions", [])
+            primary_pos = positions[0].lower() if positions else "lane"
+            attack_type = champ.get("attackType", "combatant").lower()
+            resource = champ.get("resource", "mana").lower()
+            playstyles = champ.get("playstyles", [])
+            primary_ps = playstyles[0].lower() if playstyles else "combat"
+            win_conditions = champ.get("winConditions", [])
+            primary_wc = win_conditions[0].lower() if win_conditions else "teamfight"
+            cc_types = champ.get("cc_types", [])
+            primary_cc = cc_types[0].lower() if cc_types else "crowd control"
 
+            entity_chunks = self.chunks_by_entity.get(name.lower(), [])
             overview_chunks = [c for c in entity_chunks if c.chunk_type == "overview"]
             stats_chunks = [c for c in entity_chunks if c.chunk_type == "stats"]
 
@@ -839,11 +1040,29 @@ class TrainingDataGenerator:
                     q = tmpl.format(name=name, role=primary_role)
                     triplets.append(TrainingTriplet(q, pos_chunk.text, self.get_negative(pos_chunk), "entity_champ"))
 
+                # Zero-entity / Implicit Champion Queries (No champion name mentioned)
+                implicit_overview_queries = [
+                    f"Which {attack_type} {primary_role} champion excels at {primary_ps} in {primary_pos}?",
+                    f"Champion played in {primary_pos} with {primary_cc} focusing on {primary_wc} win condition",
+                    f"{attack_type} {primary_role} whose win condition is {primary_wc}",
+                    f"Who is a {resource}-based {primary_role} champion with {primary_ps} playstyle?",
+                ]
+                for q_imp in random.sample(implicit_overview_queries, min(2 if split_mode == "train" else 1, len(implicit_overview_queries))):
+                    triplets.append(TrainingTriplet(q_imp, pos_chunk.text, self.get_negative(pos_chunk), "entity_implicit"))
+
             if stats_chunks:
                 pos_stat = stats_chunks[0]
                 for tmpl in random.sample(combined_stats, min(sample_k_stats, len(combined_stats))):
                     q = tmpl.format(name=name)
                     triplets.append(TrainingTriplet(q, pos_stat.text, self.get_negative(pos_stat), "stats_champ"))
+
+                # Zero-entity / Implicit Stats Queries
+                implicit_stats_queries = [
+                    f"Level 1 base health, armor, and attack range for a {primary_pos} {primary_role}",
+                    f"Base stats profile and growth per level for a {attack_type} {primary_role}",
+                ]
+                for q_s_imp in random.sample(implicit_stats_queries, min(1, len(implicit_stats_queries))):
+                    triplets.append(TrainingTriplet(q_s_imp, pos_stat.text, self.get_negative(pos_stat), "stats_implicit"))
 
         # 2. Item queries
         item_templates_en = [
@@ -942,6 +1161,41 @@ class TrainingDataGenerator:
             "What secondary active or passive bonus does {name}'s {key} grant?",
         ]
 
+        ability_short_en = [
+            "{name} {key} cd",
+            "{name} {key} cooldown",
+            "{name} {key} mana cost",
+            "{name} {key} range and damage",
+            "{name} {key} projectile interaction",
+            "{name} {key} spell shield block",
+            "{name} {key} on hit proc",
+            "{name} {key} cost at max rank",
+            "{name} {key} trade combo",
+            "{name} {key} wall dash",
+            "{name} {key} flash combo",
+            "{name} {key} max rank cooldown",
+            "{name} {key} cc duration",
+            "{name} {key} damage type",
+        ]
+
+        ability_conv_en = [
+            "how does {name} {key} work in combat?",
+            "can spell shield block {name}'s {key}?",
+            "is {name}'s {key} considered a projectile in LoL?",
+            "does {name} {key} trigger on-hit effects?",
+            "whats the cooldown on {name} {key}?",
+            "why didn't my shield block {name} {key}?",
+            "can {name} {key} cross walls or terrain?",
+            "does {name} {key} deal physical, magic, or true damage?",
+            "how much mana does {name} {key} cost at level 1?",
+            "can {name} flash during the {key} animation?",
+            "whats the best way to dodge or counter {name}'s {key} in lane?",
+            "how long is the crowd control on {name}'s {key}?",
+            "why is {name}'s {key} cooldown so long early game?",
+            "how much damage does {name} {key} deal at max rank?",
+            "can you interrupt {name}'s {key} cast animation?",
+        ]
+
         passive_templates_en = [
             "What is the passive ability of {name} and how does it work?",
             "Can you explain the innate passive effect of {name}?",
@@ -950,6 +1204,22 @@ class TrainingDataGenerator:
             "Give me details on the passive skill of {name}",
             "What bonus does {name}'s passive provide during combat?",
             "What tactical advantage does {name}'s passive give in lane trades?",
+        ]
+
+        passive_short_en = [
+            "{name} passive mechanics",
+            "{name} passive combat trigger",
+            "{name} passive lane trading bonus",
+            "{name} passive cd",
+            "{name} passive scaling",
+        ]
+
+        passive_conv_en = [
+            "how does {name}'s passive actually trigger in trades?",
+            "what does {name}'s passive do in teamfights?",
+            "does {name}'s passive scale with ap or ad?",
+            "what combat bonus is granted by {name}'s innate passive?",
+            "how do i play around {name}'s passive cooldown?",
         ]
 
         ability_templates_extra_en = [
@@ -965,11 +1235,12 @@ class TrainingDataGenerator:
             "How does {name}'s passive synergize with their active QWER abilities?",
         ]
 
-        combined_active = ability_templates_en + ability_templates_extra_en
-        combined_passive = passive_templates_en + passive_templates_extra_en
+        combined_active = ability_templates_en + ability_templates_extra_en + ability_short_en + ability_conv_en
+        combined_passive = passive_templates_en + passive_templates_extra_en + passive_short_en + passive_conv_en
 
-        sample_k_active = 4 if split_mode == "train" else 3
-        sample_k_passive = 3 if split_mode == "train" else 2
+        sample_k_active = 3 if split_mode == "train" else 2
+        sample_k_passive = 2 if split_mode == "train" else 2
+        sample_k_implicit = 3 if split_mode == "train" else 2
 
         for champ_id, champ in champions.items():
             name = champ.get("name", champ_id)
@@ -985,10 +1256,155 @@ class TrainingDataGenerator:
                     continue
 
                 pos_chunk = key_chunks[0]
+                ab_name = pos_chunk.metadata.get("ability_name", "")
+                mechs = self.get_ability_mechanics(pos_chunk)
+
                 for tmpl in random.sample(combined_active, min(sample_k_active, len(combined_active))):
                     q = tmpl.format(name=name, key=key)
-                    neg_text = self.get_negative(pos_chunk, prefer_same_entity=(random.random() < 0.5))
+                    neg_text = self.get_negative(pos_chunk)
                     triplets.append(TrainingTriplet(q, pos_chunk.text, neg_text, "ability_active"))
+
+                # Zero-entity / Implicit Ability Queries (No champion name mentioned - focus on mechanics & effects)
+                implicit_ability_queries = []
+                if ab_name and ab_name.strip():
+                    implicit_ability_queries.extend([
+                        f"How does the ability '{ab_name}' work in League of Legends?",
+                        f"cooldown and mechanics for '{ab_name}'",
+                        f"can '{ab_name}' be blocked by spell shield or wind wall?",
+                        f"does '{ab_name}' trigger on-hit effects?",
+                        f"'{ab_name}' ability mana cost and range",
+                    ])
+
+                if "hook_pull" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which champion ability hooks and drags an enemy target to them?",
+                        "support skill that fires a hook or grab to pull enemies",
+                        "how much mana does the skillshot hook ability cost at rank 1?",
+                        "can spell shield block the hook and pull ability?",
+                        "hook ability cooldown and range",
+                        "skillshot hook engage mechanics",
+                    ])
+                if "dash_leap" in mechs:
+                    implicit_ability_queries.extend([
+                        "champion ability that dashes or leaps forward to engage",
+                        "Which ability dashes forward and displaces enemies on impact?",
+                        "mobility skill that allows a champion to jump or dash over terrain",
+                        "can you flash during the charging dash ability?",
+                        "dash engage ability cooldown and cost",
+                        "dash skillshot engage mechanics",
+                    ])
+                if "knockup_airborne" in mechs:
+                    implicit_ability_queries.extend([
+                        "crowd control ability that knocks enemy targets airborne",
+                        "Which ultimate ability launches the champion at high speed to knock enemies into the air?",
+                        "can tenacity reduce the duration of the airborne knockup crowd control?",
+                        "airborne knockup crowd control duration and cooldown",
+                        "teamfight engage skill that knocks multiple targets into the air",
+                    ])
+                if "wind_wall_block" in mechs:
+                    implicit_ability_queries.extend([
+                        "defensive ability that destroys incoming missiles and projectiles",
+                        "Which defensive ability creates a wall that blocks all enemy projectiles?",
+                        "how does the projectile blocking wall interact with ultimate skillshots?",
+                        "can the projectile blocking wall stop basic ranged auto attacks?",
+                        "projectile blocking wall duration and cooldown",
+                    ])
+                if "stealth_invis" in mechs:
+                    implicit_ability_queries.extend([
+                        "champion skill that grants camouflage or stealth to ambush enemies",
+                        "Which ability allows the champion to vanish into invisibility and blink a short distance?",
+                        "can control wards or true sight reveal the stealth camouflage ability?",
+                        "stealth invisibility ability duration and cooldown",
+                    ])
+                if "stun" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability that stuns enemy champions on hit",
+                        "Which skillshot or targeted ability applies a stun crowd control effect?",
+                        "stun crowd control duration and cooldown",
+                        "does the stun ability interrupt channeled spells?",
+                    ])
+                if "root_snare" in mechs:
+                    implicit_ability_queries.extend([
+                        "skillshot ability that binds the enemy champion in place",
+                        "Which ability applies a root or snare immobilizing enemy targets?",
+                        "does the root ability prevent enemy champions from casting dash or flash?",
+                        "skillshot root binding cooldown and range",
+                    ])
+                if "charm_taunt_fear" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which ability applies a charm causing enemy targets to walk harmlessly toward the caster?",
+                        "taunt ability that forces enemy champions to attack the caster while gaining bonus defense",
+                        "aoe fear crowd control ability in teamfights",
+                        "crowd control skill that forces enemies to flee",
+                    ])
+                if "silence_suppress" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which targeted ultimate suppresses the enemy champion, preventing any action or summoner spells?",
+                        "can Cleanse break the targeted suppression ultimate?",
+                        "silence zone that prevents enemy champions from casting abilities",
+                    ])
+                if "blind" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which ability shoots a dart that blinds the target, causing basic attacks to miss?",
+                        "blinding dart duration against marksmen",
+                        "does the blind crowd control effect prevent on-hit damage?",
+                    ])
+                if "shield_barrier" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability that grants a defensive shield to absorb damage",
+                        "Which ability grants a targeted shield to protect an ally in combat?",
+                        "shield absorption amount and cooldown scaling",
+                    ])
+                if "spellshield" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which ability creates a protective barrier that negates the next enemy spell?",
+                        "spell shield skill that absorbs an incoming crowd control ability",
+                        "spell shield cooldown and barrier duration",
+                    ])
+                if "heal_regen" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability that restores health to an ally during combat",
+                        "Which targeted ability heals allied champions at the cost of health or mana?",
+                        "how does Grievous Wounds affect the targeted heal ability?",
+                        "healing ability cooldown and scaling",
+                    ])
+                if "execute" in mechs:
+                    implicit_ability_queries.extend([
+                        "ultimate ability dealing increased damage based on missing health",
+                        "Which ultimate ability strikes in an area and executes low health champions while resetting on kill?",
+                        "execute reset ultimate cooldown and scaling",
+                    ])
+                if "revive" in mechs:
+                    implicit_ability_queries.extend([
+                        "Which passive or ultimate ability prevents death and revives the champion upon taking fatal damage?",
+                        "revive ability cooldown and resurrection mechanics",
+                    ])
+                if "reset_mechanic" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability whose cooldown is refreshed or reset upon scoring a takedown or kill",
+                        "reset mechanic ability in teamfights",
+                    ])
+                if "slow_cc" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability that slows enemy movement speed on hit",
+                        "slow crowd control percentage and cooldown",
+                    ])
+                if "steroid_buff" in mechs:
+                    implicit_ability_queries.extend([
+                        "ability that grants a burst of movement speed or attack speed",
+                        "combat buff ability that empowers basic attacks",
+                    ])
+
+                if not implicit_ability_queries:
+                    implicit_ability_queries = [
+                        "champion combat ability cooldown and resource cost",
+                        "active combat spell damage scaling and range",
+                        "lane trade combat ability mechanics and interaction",
+                    ]
+
+                for q_ab_imp in random.sample(implicit_ability_queries, min(sample_k_implicit, len(implicit_ability_queries))):
+                    neg_text = self.get_negative(pos_chunk)
+                    triplets.append(TrainingTriplet(q_ab_imp, pos_chunk.text, neg_text, "ability_implicit"))
 
             # Passive (P)
             passive_chunks = [
@@ -997,10 +1413,39 @@ class TrainingDataGenerator:
             ]
             if passive_chunks:
                 pos_p = passive_chunks[0]
+                ab_p_name = pos_p.metadata.get("ability_name", "")
+                p_mechs = self.get_ability_mechanics(pos_p)
+
                 for tmpl in random.sample(combined_passive, min(sample_k_passive, len(combined_passive))):
                     q = tmpl.format(name=name)
-                    neg_text = self.get_negative(pos_p, prefer_same_entity=(random.random() < 0.5))
+                    neg_text = self.get_negative(pos_p)
                     triplets.append(TrainingTriplet(q, pos_p.text, neg_text, "ability_passive"))
+
+                # Zero-entity / Implicit Passive Queries
+                imp_p = []
+                if ab_p_name and ab_p_name.strip():
+                    imp_p.extend([
+                        f"How does the passive ability '{ab_p_name}' function in combat?",
+                        f"What combat bonus is granted by the '{ab_p_name}' innate passive?",
+                        f"'{ab_p_name}' passive combat trigger and cooldown",
+                    ])
+                if "revive" in p_mechs:
+                    imp_p.append("Which passive ability prevents death and revives the champion on fatal damage?")
+                if "heal_regen" in p_mechs:
+                    imp_p.append("innate passive that heals the champion during combat based on health")
+                if "shield_barrier" in p_mechs:
+                    imp_p.append("passive ability that grants a protective shield during combat")
+                if "steroid_buff" in p_mechs:
+                    imp_p.append("innate passive that grants stacking combat stats on basic attacks")
+                if not imp_p:
+                    imp_p = [
+                        "How does this innate passive function in lane trading?",
+                        "What combat bonus is granted by this champion's innate passive?",
+                    ]
+
+                for q_p_imp in random.sample(imp_p, min(sample_k_passive, len(imp_p))):
+                    neg_text = self.get_negative(pos_p)
+                    triplets.append(TrainingTriplet(q_p_imp, pos_p.text, neg_text, "passive_implicit"))
 
         return triplets
 
@@ -2205,6 +2650,51 @@ class TrainingDataGenerator:
                 if not cnt_doc.get("spellshieldable_abilities") and c.get("mechanicsSummary", {}).get("spellshieldableAbilities"):
                     cnt_doc["spellshieldable_abilities"] = c.get("mechanicsSummary", {}).get("spellshieldableAbilities")
 
+        counter_short_en = [
+            "{name} counter picks",
+            "{name} lane matchup",
+            "{name} counter items",
+            "{name} weaknesses",
+            "{name} laning tips",
+            "how to beat {name}",
+            "who beats {name} in lane",
+        ]
+
+        counter_conv_en = [
+            "who should i ban if i want to play {name}?",
+            "how do i survive lane against {name}?",
+            "what items should i buy when struggling against {name}?",
+            "can i trade aggressively against {name} early?",
+            "what is the best defensive item rush against {name}?",
+            "how to exploit {name}'s long cooldowns?",
+        ]
+
+        pair_weak_short_en = [
+            "{enemy} vs {name} matchup",
+            "{enemy} counter into {name}",
+            "{enemy} lane trade against {name}",
+        ]
+
+        pair_weak_conv_en = [
+            "why does {enemy} counter {name} so hard?",
+            "how does {enemy} win trades against {name} in lane?",
+            "can {name} ever beat {enemy} in a 1v1?",
+        ]
+
+        pair_strong_short_en = [
+            "{name} vs {victim} lane trade",
+            "{name} favorable matchup against {victim}",
+        ]
+
+        pair_strong_conv_en = [
+            "why does {name} beat {victim} so easily?",
+            "can {victim} survive against {name} in lane?",
+        ]
+
+        combined_counter = counter_templates_en + counter_short_en + counter_conv_en
+        combined_pair_weak = pair_weak_en + pair_weak_short_en + pair_weak_conv_en
+        combined_pair_strong = pair_strong_en + pair_strong_short_en + pair_strong_conv_en
+
         sample_k_gen = 4 if split_mode == "train" else 3
         sample_k_pair = 2 if split_mode == "train" else 2
 
@@ -2217,7 +2707,7 @@ class TrainingDataGenerator:
             neg_text = self.get_negative(c_chunk)
 
             # 1. General counter templates (incoming)
-            for tmpl in random.sample(counter_templates_en, min(sample_k_gen, len(counter_templates_en))):
+            for tmpl in random.sample(combined_counter, min(sample_k_gen, len(combined_counter))):
                 q = tmpl.format(name=champ_name)
                 triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_matchup"))
 
@@ -2236,6 +2726,18 @@ class TrainingDataGenerator:
                 tmpl = random.choice(tactical_tip_templates_en)
                 q = tmpl.format(name=champ_name)
                 triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_tips"))
+
+            # Zero-entity / Implicit Counter Queries based on tactical weakness
+            weaknesses = data.get("weaknesses", [])
+            w_text = " ".join(str(w) for w in weaknesses).lower() if weaknesses else ""
+            if "immobile" in w_text or "kiting" in w_text or "melee" in w_text:
+                triplets.append(TrainingTriplet("how to counter an immobile melee lane bully vulnerable to ranged kiting?", c_chunk.text, neg_text, "counter_implicit"))
+            if "burst" in w_text or "fragile" in w_text or "low base health" in w_text:
+                triplets.append(TrainingTriplet("how to punish squishy lane champions vulnerable to crowd control lockdown and burst", c_chunk.text, neg_text, "counter_implicit"))
+            if "healing" in w_text or "vamp" in w_text:
+                triplets.append(TrainingTriplet("what counter items shut down champions with heavy healing and lifesteal sustain in trades?", c_chunk.text, neg_text, "counter_implicit"))
+            if "mobility" in w_text or "dash" in w_text:
+                triplets.append(TrainingTriplet("counter strategy against champions reliant on mobility dashes with no disengage", c_chunk.text, neg_text, "counter_implicit"))
 
             # 2B. Official Riot Tips (Enemy and Ally)
             if data.get("official_enemytips"):
@@ -2266,7 +2768,7 @@ class TrainingDataGenerator:
                 enemy = m.get("champion")
                 if not enemy:
                     continue
-                for tmpl in random.sample(pair_weak_en, min(sample_k_pair, len(pair_weak_en))):
+                for tmpl in random.sample(combined_pair_weak, min(sample_k_pair, len(combined_pair_weak))):
                     q = tmpl.format(name=champ_name, enemy=enemy)
                     triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_pair_weak"))
 
@@ -2276,7 +2778,7 @@ class TrainingDataGenerator:
                 victim = m.get("champion")
                 if not victim:
                     continue
-                for tmpl in random.sample(pair_strong_en, min(sample_k_pair, len(pair_strong_en))):
+                for tmpl in random.sample(combined_pair_strong, min(sample_k_pair, len(combined_pair_strong))):
                     q = tmpl.format(name=champ_name, victim=victim)
                     triplets.append(TrainingTriplet(q, c_chunk.text, neg_text, "counter_pair_strong"))
 
@@ -2323,6 +2825,33 @@ class TrainingDataGenerator:
             "How do {name} and {partner} coordinate their abilities for teamfight impact?",
         ]
 
+        synergy_short_en = [
+            "{name} best duo",
+            "{name} duo partner",
+            "{name} synergy picks",
+            "{name} duo lane pairing",
+        ]
+
+        synergy_conv_en = [
+            "who pairs best with {name} in bot lane?",
+            "whats the best duo partner for {name}?",
+            "who should my friend play if i pick {name}?",
+            "how should {name} and their duo play 2v2 skirmishes?",
+        ]
+
+        pair_synergy_short_en = [
+            "{name} and {partner} combo",
+            "{name} {partner} 2v2 synergy",
+        ]
+
+        pair_synergy_conv_en = [
+            "can {name} and {partner} chain crowd control together?",
+            "why do {name} and {partner} win so many games as a duo?",
+        ]
+
+        combined_synergy = synergy_templates_en + synergy_short_en + synergy_conv_en
+        combined_pair_synergy = pair_synergy_en + pair_synergy_short_en + pair_synergy_conv_en
+
         all_synergies = {}
         if synergies:
             all_synergies.update(synergies)
@@ -2346,17 +2875,21 @@ class TrainingDataGenerator:
             neg_text = self.get_negative(s_chunk)
 
             # 1. General templates
-            for tmpl in random.sample(synergy_templates_en, min(sample_k_gen, len(synergy_templates_en))):
+            for tmpl in random.sample(combined_synergy, min(sample_k_gen, len(combined_synergy))):
                 q = tmpl.format(name=champ_name)
                 triplets.append(TrainingTriplet(q, s_chunk.text, neg_text, "synergy_duo"))
 
-            # 2. Specific duo pair queries
+            # Zero-entity / Implicit Synergy Queries
             duo_list = data.get("best_duos") or data.get("synergies", []) if isinstance(data, dict) else []
+            if duo_list:
+                triplets.append(TrainingTriplet("best duo partner synergies to chain crowd control and burst in 2v2 skirmishes", s_chunk.text, neg_text, "synergy_implicit"))
+
+            # 2. Specific duo pair queries
             for duo in duo_list[:4]:
                 partner = duo.get("partner") or duo.get("champion")
                 if not partner:
                     continue
-                for tmpl in random.sample(pair_synergy_en, min(sample_k_pair, len(pair_synergy_en))):
+                for tmpl in random.sample(combined_pair_synergy, min(sample_k_pair, len(combined_pair_synergy))):
                     q = tmpl.format(name=champ_name, partner=partner)
                     triplets.append(TrainingTriplet(q, s_chunk.text, neg_text, "synergy_pair"))
 
@@ -2400,6 +2933,24 @@ class TrainingDataGenerator:
             "How should I itemize and build {name}?",
         ]
 
+        build_short_en = [
+            "{name} build",
+            "{name} core items",
+            "{name} runes",
+            "{name} starting items",
+            "{name} best keystone",
+            "{name} summoner spells",
+            "{name} boots choice",
+            "{name} 6 item build",
+        ]
+
+        build_conv_en = [
+            "what should i buy first on {name}?",
+            "is {name}'s recommended rune page still viable?",
+            "when does {name} hit their biggest item power spike?",
+            "what starting items work best on {name} in lane?",
+        ]
+
         item_specific_en = [
             "Why is {item} a core item on {name}?",
             "Does {name} always rush {item} in their build path?",
@@ -2415,6 +2966,8 @@ class TrainingDataGenerator:
             "Why is {keystone} the preferred keystone rune on {name}?",
             "What makes {keystone} the most optimal rune choice for {name}?",
         ]
+
+        combined_build = build_templates_en + build_short_en + build_conv_en
 
         all_builds = {}
         if builds:
@@ -2435,9 +2988,20 @@ class TrainingDataGenerator:
             neg_text = self.get_negative(b_chunk)
 
             # 1. General templates
-            for tmpl in random.sample(build_templates_en, min(sample_k_gen, len(build_templates_en))):
+            for tmpl in random.sample(combined_build, min(sample_k_gen, len(combined_build))):
                 q = tmpl.format(name=champ_name)
                 triplets.append(TrainingTriplet(q, b_chunk.text, neg_text, "build_loadout"))
+
+            # Zero-entity / Implicit Build Queries based on keystone/role
+            k_lower = str(data.get("keystone", "")).lower()
+            if any(k in k_lower for k in ["lethal tempo", "conqueror", "press the attack", "fleet"]):
+                triplets.append(TrainingTriplet("optimal core item build and sustained runes for an attack speed fighter or marksman", b_chunk.text, neg_text, "build_implicit"))
+            elif any(k in k_lower for k in ["aftershock", "grasp", "guardian"]):
+                triplets.append(TrainingTriplet("defensive armor and health item build for a front-line tank", b_chunk.text, neg_text, "build_implicit"))
+            elif any(k in k_lower for k in ["electrocute", "dark harvest"]):
+                triplets.append(TrainingTriplet("core lethality and burst damage runes for an assassin", b_chunk.text, neg_text, "build_implicit"))
+            elif any(k in k_lower for k in ["comet", "aery", "first strike"]):
+                triplets.append(TrainingTriplet("ability power itemization and mana sustain runes for a mage", b_chunk.text, neg_text, "build_implicit"))
 
             # 2. Specific core item queries - gracefully skip missing fields
             core_items = data.get("coreItems") or data.get("core_items") or []

@@ -41,7 +41,7 @@ def resolve_data_path(path_str):
     return p
 
 
-from rag.vector.embeddings import EmbeddingModel, DEFAULT_MODEL
+from rag.vector.embeddings import EmbeddingModel, default_model as DEFAULT_MODEL
 from rag.vector.store import VectorStore
 from training.data_generator import TrainingTriplet
 
