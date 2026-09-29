@@ -104,7 +104,14 @@ class HybridRetriever:
         for list_idx, results in enumerate(ranked_lists):
             for rank, ctx in enumerate(results, start=1):
                 text = ctx.get("text", "")
-                text_key = text[:200]
+                # Prefer structured key for dedup to avoid text truncation collisions
+                meta = ctx.get("metadata", {})
+                entity = meta.get("entity_name", "")
+                chunk_type = meta.get("chunk_type", "")
+                if entity and chunk_type:
+                    text_key = f"{entity}::{chunk_type}"
+                else:
+                    text_key = text[:200]
 
                 if text_key not in score_map:
                     score_map[text_key] = {

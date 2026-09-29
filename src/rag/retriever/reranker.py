@@ -5,6 +5,8 @@ Re-ranks retrieval candidates using a cross-encoder model that
 jointly encodes (query, passage) pairs for more accurate relevance scoring.
 """
 
+import math
+
 import torch
 
 
@@ -46,7 +48,11 @@ class CrossEncoderReranker:
         scores = self.model.predict(pairs, show_progress_bar=False)
 
         for candidate, score in zip(candidates, scores):
-            candidate[score_key] = float(score)
+            raw_logit = float(score)
+            candidate[score_key] = raw_logit
+            # Safe sigmoid: clamp logit to [-60, 60] to prevent overflow, normalize to [0, 1]
+            clamped = max(-60.0, min(60.0, raw_logit))
+            candidate["score"] = 1.0 / (1.0 + math.exp(-clamped))
 
         reranked = sorted(candidates, key=lambda x: x.get(score_key, 0), reverse=True)
         return reranked[:top_k]
