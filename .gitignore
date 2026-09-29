@@ -28,6 +28,7 @@ src/processors/processed/
 *.jpeg
 *.webp
 *.svg
+*.mp4
 plots/
 src/eda/output/plots/
 
