@@ -92,47 +92,8 @@ class LoLBot:
             extra_terms = "peel disengage anti-dive crowd control protection" if ("support" in str(u_role).lower() or "dive" in str(t_val).lower() or "assassin" in str(t_val).lower()) else "items kit mechanics"
             return f"Best {u_role} counter picks against {t_val} {extra_terms} in League of Legends"
 
-        # 4. Team Composition / Archetype Queries (Drafting vs Countering)
-        if intent == "TEAM_COMPOSITION_BUILDING" or comp_archetype or damage_composition:
-            target_comp = damage_composition or comp_archetype or "hypercarry_protect"
-            is_counter_comp = (
-                intent == "TEAM_COUNTER_ANALYSIS"
-                and any(w in question.lower() for w in ["counter", "against", "beat", "facing", "versus", "vs", "punish", "enemy"])
-            ) or (
-                intent != "TEAM_COMPOSITION_BUILDING"
-                and any(w in question.lower() for w in ["counter", "against", "beat", "facing", "versus", "vs", "punish", "enemy"])
-            )
-            if is_counter_comp:
-                return f"Counter picks and itemization strategy against {target_comp} team composition in League of Legends"
-            else:
-                p_curve = classification.get("power_curve") or ""
-                return f"Drafting core champions synergies {p_curve} and playstyle for {target_comp} team composition League of Legends"
-
-        # 5. Multi-Enemy Team Counter Analysis
-        if intent == "TEAM_COUNTER_ANALYSIS" or (enemy_champs and len(enemy_champs) >= 2 and intent in ("COUNTER_QUERY", "UNKNOWN")):
-            team_str = ", ".join(enemy_champs) if enemy_champs else "enemy team"
-            return f"Counter picks team composition strategy against {team_str} League of Legends"
-
-        # 6. Item Queries
-        if intent == "ITEM_INFO" or (item and intent not in ("BUILD_QUERY", "COUNTER_QUERY")):
-            item_target = item or question
-            return f"{item_target} item stats recipe build cost passive active League of Legends"
-
-        # 7. Rune Queries
-        if intent == "RUNE_INFO" or (rune and intent not in ("BUILD_QUERY", "COUNTER_QUERY")):
-            rune_target = rune or question
-            return f"{rune_target} rune keystone precision domination sorcery resolve inspiration League of Legends"
-
-        # 8. Skin / Cosmetic Query
-        if intent == "SKIN_QUERY":
-            return f"{champ or ''} skins cosmetics chromas splash art catalog League of Legends".strip()
-
-        # 9. ARAM Balance Query
-        if intent == "ARAM_QUERY":
-            return f"{champ or ''} ARAM balance damage dealt taken modifiers Howling Abyss League of Legends".strip()
-
-        # 10. Targeted Single Champion Queries
-        if champ:
+        # 4. Targeted Single Champion Queries (High Priority when a champion is the subject)
+        if champ and intent not in ("TEAM_COMPOSITION_BUILDING", "TEAM_COUNTER_ANALYSIS", "ITEM_INFO", "RUNE_INFO"):
             if skill_key or intent in ("SKILL_INFO", "SKILL_COOLDOWN", "SKILL_DAMAGE_AT_LEVEL", "SKILL_MANA_COST", "LIST_SKILLS"):
                 sk_str = f" {skill_key}" if skill_key else ""
                 return f"{champ}{sk_str} ability mechanics damage cooldown scaling cost League of Legends"
@@ -153,6 +114,42 @@ class LoLBot:
                 return f"{champ} playstyle win condition power curve teamfight splitpush strategy League of Legends"
             else:
                 return f"{champ} {lane_str}champion abilities playstyle tactics overview League of Legends"
+
+        # 5. Team Composition / Archetype Queries (Drafting vs Countering)
+        if intent in ("TEAM_COMPOSITION_BUILDING", "TEAM_COUNTER_ANALYSIS") or ((comp_archetype or damage_composition) and not champ):
+            target_comp = damage_composition or comp_archetype or "hypercarry_protect"
+            is_counter_comp = (
+                intent == "TEAM_COUNTER_ANALYSIS"
+                or any(w in question.lower() for w in ["counter", "against", "beat", "facing", "versus", "vs", "punish", "enemy"])
+            )
+            if is_counter_comp:
+                return f"Counter picks and itemization strategy against {target_comp} team composition in League of Legends"
+            else:
+                p_curve = classification.get("power_curve") or ""
+                return f"Drafting core champions synergies {p_curve} and playstyle for {target_comp} team composition League of Legends"
+
+        # 6. Multi-Enemy Team Counter Analysis
+        if intent == "TEAM_COUNTER_ANALYSIS" or (enemy_champs and len(enemy_champs) >= 2 and intent in ("COUNTER_QUERY", "UNKNOWN")):
+            team_str = ", ".join(enemy_champs) if enemy_champs else "enemy team"
+            return f"Counter picks team composition strategy against {team_str} League of Legends"
+
+        # 7. Item Queries
+        if intent == "ITEM_INFO" or (item and not champ):
+            item_target = item or question
+            return f"{item_target} item stats recipe build cost passive active League of Legends"
+
+        # 8. Rune Queries
+        if intent == "RUNE_INFO" or (rune and not champ):
+            rune_target = rune or question
+            return f"{rune_target} rune keystone precision domination sorcery resolve inspiration League of Legends"
+
+        # 9. Skin / Cosmetic Query
+        if intent == "SKIN_QUERY":
+            return f"{champ or ''} skins cosmetics chromas splash art catalog League of Legends".strip()
+
+        # 10. ARAM Balance Query
+        if intent == "ARAM_QUERY":
+            return f"{champ or ''} ARAM balance damage dealt taken modifiers Howling Abyss League of Legends".strip()
 
         # 11. Crowd Control / Ability Effect Filters
         if cc_types or effects or intent in ("CHAMPION_BY_CC", "CHAMPION_BY_EFFECT", "MULTI_PROPERTY_FILTER"):
@@ -272,13 +269,17 @@ class LoLBot:
         has_comp = bool(classification.get("comp_archetype") or classification.get("damage_composition"))
         has_entity = has_champion or has_item or has_rune or has_role or has_lane or has_comp
 
+        # After reranking, "score" is sigmoid-normalized [0,1].
+        # Before reranking (fallback), "score" is RRF (always < 0.1).
+        # Use rerank_score (raw logit) if available, otherwise use score.
         top_rag_score = max([c.get("score", 0.0) for c in rag_contexts]) if rag_contexts else 0.0
         insufficient_context = False
 
         if not rag_contexts:
             insufficient_context = True
-        elif not has_entity and top_rag_score < 0.38:
+        elif not has_entity and top_rag_score < 0.3:
             # No domain entities recognized and retrieval confidence is low -> out of scope
+            # 0.3 sigmoid ≈ logit of -0.85, meaning "probably not relevant"
             insufficient_context = True
             rag_contexts = []
             rag_context_text = ""

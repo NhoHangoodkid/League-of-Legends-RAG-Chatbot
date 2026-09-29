@@ -27,7 +27,7 @@ processed_dir = processors_dir / "processed"
 max_history_turns = 6
 llm_temperature = 0.4
 
-llm_num_ctx = int(os.getenv("LLM_NUM_CTX", "4096"))
+llm_num_ctx = int(os.getenv("LLM_NUM_CTX", "8192"))
 llm_num_predict = int(os.getenv("LLM_NUM_PREDICT", "2048"))
 
 response_language = "English"
@@ -46,7 +46,7 @@ lora_adapter_dir = project_root / "models" / "lora_embedding"
 # Retrieval Settings
 enable_graph_rag = os.getenv("ENABLE_GRAPH_RAG", "false").lower() == "true"
 enable_vector_rag = os.getenv("ENABLE_VECTOR_RAG", "true").lower() == "true"
-enable_reranker = os.getenv("ENABLE_RERANKER", "true").lower() == "true"
+enable_reranker = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
 
 graph_top_k = 10
 vector_top_k = 10

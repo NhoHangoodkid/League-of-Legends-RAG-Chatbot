@@ -616,8 +616,11 @@ class IntentClassifier:
         elif has_comp and is_draft_query and not any(w in q for w in ["counter", "against", "beat", "punish", "enemy"]):
             result["intent"] = "TEAM_COMPOSITION_BUILDING"
         elif is_counter_intent:
-            is_comp_q = has_comp or any(w in q for w in ["comp", "composition", "team comp", "lineup", "line-up", "bo khung", "đội hình"])
-            if len(detected_champs) >= 2 or (is_comp_q and any(w in q for w in ["counter", "against", "beat", "punish", "enemy", "deal with", "face", "facing", "versus", "vs"])):
+            is_explicit_team_context = any(w in q for w in ["comp", "composition", "team comp", "lineup", "line-up", "bo khung", "đội hình", "full ad", "all ad", "full ap", "all ap"])
+            is_comp_q = is_explicit_team_context or has_comp
+            is_single_champ_counter = bool(result.get("champion_name")) and not is_explicit_team_context
+            # Multi-enemy team counter requires 3+ champions or explicit team comp context without single champ target
+            if not is_single_champ_counter and (len(detected_champs) >= 3 or (is_explicit_team_context and any(w in q for w in ["counter", "against", "beat", "punish", "enemy", "deal with", "face", "facing", "versus", "vs"]))):
                 result["intent"] = "TEAM_COUNTER_ANALYSIS"
                 if detected_champs:
                     result["enemy_champions"] = detected_champs
@@ -628,7 +631,21 @@ class IntentClassifier:
                         result["comp_archetype"] = "poke"
                     elif re.search(r"\b(?:wombo|teamfight|team-?fight|5v5|aoe|giao tranh)\b", q):
                         result["comp_archetype"] = "wombo_combo"
-            elif has_comp:
+            elif len(detected_champs) == 2 and not is_comp_q:
+                # 1v1 matchup counter question (e.g. "Is Garen a counter to Mordekaiser?")
+                result["intent"] = "COUNTER_QUERY"
+                # The target to counter is usually the second champion or object of "to/against"
+                match_target = re.search(r"(?:counter\s+(?:to|against)?|against|beat)\s+([a-z0-9' .-]+)", q)
+                if match_target:
+                    target_txt = match_target.group(1).lower()
+                    for c in detected_champs:
+                        if c.lower() in target_txt:
+                            result["champion_name"] = c
+                            break
+                if not result.get("champion_name") and detected_champs:
+                    result["champion_name"] = detected_champs[-1]
+                result["enemy_champions"] = None
+            elif has_comp and not result.get("champion_name"):
                 result["intent"] = "TEAM_COMPOSITION_BUILDING"
             elif not result.get("champion_name") and is_comp_q:
                 result["intent"] = "TEAM_COUNTER_ANALYSIS"
@@ -643,6 +660,8 @@ class IntentClassifier:
                         result["comp_archetype"] = "wombo_combo"
             else:
                 result["intent"] = "COUNTER_QUERY"
+                if is_single_champ_counter:
+                    result["comp_archetype"] = None
             # Determine counter direction:
             # "counters" = who does this champion counter / favorable matchups (e.g. "Who does Yasuo counter?")
             # "countered_by" = who counters this champion / how to play against them (e.g. "Who counters Yasuo?")
@@ -660,13 +679,34 @@ class IntentClassifier:
 
             result["counter_direction"] = "counters" if is_outgoing_counter else "countered_by"
         elif any(w in q for w in [
-            "synerg", "pair with", "pairs with", "combo with", "duo with", "best support for", "partner", "good with",
+            "synerg", "pair with", "pairs with", "pair well with", "pairs well with",
+            "combo with", "combos with", "combo well with", "combos well with", "goes well with", "go well with",
+            "duo with", "best duo", "best adc to play with", "adc to play with", "adc with", "support with",
+            "best support for", "good support for", "support for", "support to",
+            "partner", "good with", "work well with", "works well with", "play well with", "plays well with",
             "an y", "ăn ý", "hop voi", "hợp với", "di chung", "đi chung",
             "di cap", "đi cặp", "cap voi", "cặp với", "bo doi", "bộ đôi", "di voi", "đi với", "ket hop", "kết hợp",
             "tuong di cung", "tướng đi cùng", "tuong hop", "tướng hợp", "sp cho", "support cho", "ho tro cho", "hỗ trợ cho",
             "phoi hop", "phối hợp", "hop nhat", "hợp nhất", "choi cung", "chơi cùng", "danh cung", "đánh cùng"
         ]):
             result["intent"] = "SYNERGY_QUERY"
+            # Clear accidental item or role assignment when asking for champion support/synergy
+            if result.get("champion_name"):
+                result["item_name"] = None
+                result["role"] = None
+        # Champion Stats Intent (Base stats or stats at level) - Check before generic damage
+        elif any(re.search(r"\b" + re.escape(w) + r"\b", q) for w in [
+            "base stat", "base stats", "stats", "stat",
+            "base health", "health", "hp", "armor", "magic resist", "mr",
+            "attack speed", "movement speed", "attack range", "base ad", "base attack damage", "attack damage"
+        ]) and (result.get("champion_name") or not result.get("item_name")):
+            if result.get("character_level"):
+                result["intent"] = "CHAMPION_STATS_AT_LEVEL"
+            else:
+                result["intent"] = "CHAMPION_BASE_STATS"
+            # "HP" in "Base HP of Cho'Gath" shouldn't stay as Health Potion
+            if result.get("champion_name") and result.get("item_name") == "Health Potion" and "potion" not in q:
+                result["item_name"] = None
         elif any(w in q for w in [
             "build", "items", "itemization", "runes", "keystone", "core items", "spells",
             "core item", "core", "full build", "rune page", "summoner spell", "summoner spells"
@@ -679,16 +719,6 @@ class IntentClassifier:
             result["intent"] = "SKILL_DAMAGE_AT_LEVEL" if result["skill_key"] else "CHAMPION_INFO"
         elif any(w in q for w in ["cooldown", "cd"]):
             result["intent"] = "SKILL_COOLDOWN"
-        # Champion Stats Intent (Base stats or stats at level)
-        elif any(re.search(r"\b" + re.escape(w) + r"\b", q) for w in [
-            "base stat", "base stats", "stats", "stat",
-            "base health", "health", "hp", "armor", "magic resist", "mr",
-            "attack speed", "movement speed", "attack range", "base ad", "attack damage"
-        ]) and (result.get("champion_name") or not result.get("item_name")):
-            if result.get("character_level"):
-                result["intent"] = "CHAMPION_STATS_AT_LEVEL"
-            else:
-                result["intent"] = "CHAMPION_BASE_STATS"
 
         # Ability effects: Pull / Hook, Stealth, Dash / Mobility, Shield, Heal / Sustain
         elif re.search(r"\b(?:hook|pull|grab)\b", q):
@@ -750,6 +780,8 @@ class IntentClassifier:
             result["intent"] = "LANE_QUERY"
         elif result.get("role") and not result.get("champion_name") and any(w in q for w in ["champion", "champions", "champ", "champs", "who is", "what are", "picks", "pool", "meta", "list"]):
             result["intent"] = "ROLE_QUERY"
+        elif result.get("champion_name") and result.get("skill_key"):
+            result["intent"] = "SKILL_INFO"
         elif any(w in q for w in ["tell me about", "overview", "guide", "who is", "about"]):
             result["intent"] = "CHAMPION_INFO"
 
