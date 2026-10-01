@@ -23,10 +23,20 @@ from chatbot.config import (
     vector_index_dir,
     vector_top_k,
 )
-from chatbot.data_retriever import DataRetriever
+from chatbot.retriever import DataRetriever
 from chatbot.intent_classifier import IntentClassifier
 from chatbot.knowledge_store import KnowledgeStore, get_knowledge_store
 from chatbot.response_generator import ResponseGenerator
+from chatbot.data.query_templates import (
+    CC_EFFECT_INTENTS,
+    CHAMPION_PLAYSTYLE_INTENTS,
+    CHAMPION_QUERY_TEMPLATES,
+    CHAMPION_STAT_INTENTS,
+    COUNTER_KEYWORDS,
+    NON_CHAMPION_TARGETED_INTENTS,
+    SKILL_INTENTS,
+    STANDALONE_QUERY_TEMPLATES,
+)
 from rag.pipeline import RAGPipeline, get_rag_pipeline
 
 
@@ -48,8 +58,7 @@ class LoLBot:
                 enable_vector = enable_vector_rag,
                 enable_reranker = enable_reranker,
             )
-        except Exception as e:
-            print(f"[LoLBot] Notice: RAG pipeline init ({e}). Using structured retriever fallback.")
+        except Exception:
             self.rag_pipeline = None
 
     def build_retrieval_query(self, question, classification, intent):
@@ -77,7 +86,7 @@ class LoLBot:
             comp_list = comparison if (comparison and len(comparison) >= 2) else ([champ] if champ else ["champion1", "champion2"])
             return f"Compare {' vs '.join(comp_list[:2])} matchup counter head to head lane mechanics stats League of Legends"
 
-        # 2. Ability Mechanics Query (e.g. Does Yasuo's Wind Wall block Lux's R?)
+        # 2. Ability Mechanics Query
         if intent == "ABILITY_MECHANIC_QUERY":
             sk_str = f" ability {skill_key}" if skill_key else ""
             inter = classification.get("interaction_champion", "")
@@ -85,92 +94,102 @@ class LoLBot:
             mech = classification.get("mechanic", "")
             return f"{champ or ''}{sk_str} ability description {mech}{inter_str} League of Legends".strip()
 
-        # 3. Role-Specific Counter Pick Query (e.g. Which Support to pick against Dive and Assassins)
+        # 3. Role-Specific Counter Pick Query
         if intent == "ROLE_COUNTER_PICK":
             u_role = classification.get("user_role") or role or "champion"
             t_val = classification.get("target") or "enemy"
             extra_terms = "peel disengage anti-dive crowd control protection" if ("support" in str(u_role).lower() or "dive" in str(t_val).lower() or "assassin" in str(t_val).lower()) else "items kit mechanics"
             return f"Best {u_role} counter picks against {t_val} {extra_terms} in League of Legends"
 
-        # 4. Targeted Single Champion Queries (High Priority when a champion is the subject)
-        if champ and intent not in ("TEAM_COMPOSITION_BUILDING", "TEAM_COUNTER_ANALYSIS", "ITEM_INFO", "RUNE_INFO"):
-            if skill_key or intent in ("SKILL_INFO", "SKILL_COOLDOWN", "SKILL_DAMAGE_AT_LEVEL", "SKILL_MANA_COST", "LIST_SKILLS"):
+        # 4. Targeted Single Champion Queries
+        if champ and intent not in NON_CHAMPION_TARGETED_INTENTS:
+            if skill_key or intent in SKILL_INTENTS:
                 sk_str = f" {skill_key}" if skill_key else ""
                 return f"{champ}{sk_str} ability mechanics damage cooldown scaling cost League of Legends"
-            elif intent == "LORE_QUERY":
-                return f"{champ} lore story biography origin background Runeterra League of Legends"
-            elif intent == "COUNTER_QUERY":
-                direction = classification.get("counter_direction")
-                if direction == "counters":
+            if intent == "COUNTER_QUERY":
+                if classification.get("counter_direction") == "counters":
                     return f"Who does {champ} counter favorable matchups strong against League of Legends"
                 return f"How to counter {champ} {lane_str}in League of Legends weaknesses tips counter items counter picks"
-            elif intent == "BUILD_QUERY":
-                return f"Best build items runes keystone guide for {champ} {lane_str}League of Legends"
-            elif intent == "SYNERGY_QUERY":
-                return f"Best duo synergy champions teamfight combos with {champ} League of Legends"
-            elif intent in ("CHAMPION_BASE_STATS", "CHAMPION_STATS_AT_LEVEL"):
+            if intent in CHAMPION_QUERY_TEMPLATES:
+                return CHAMPION_QUERY_TEMPLATES[intent].format(champ=champ, lane=lane_str)
+            if intent in CHAMPION_STAT_INTENTS:
                 return f"{champ} base stats growth health attack damage armor magic resist League of Legends"
-            elif intent in ("CHAMPION_SEMANTIC_PROFILE", "CHAMPION_BY_PLAYSTYLE", "CHAMPION_BY_WIN_CONDITION"):
+            if intent in CHAMPION_PLAYSTYLE_INTENTS:
                 return f"{champ} playstyle win condition power curve teamfight splitpush strategy League of Legends"
-            else:
-                return f"{champ} {lane_str}champion abilities playstyle tactics overview League of Legends"
+            return f"{champ} {lane_str}champion abilities playstyle tactics overview League of Legends"
 
-        # 5. Team Composition / Archetype Queries (Drafting vs Countering)
+        # 5. Team Composition / Archetype Queries
         if intent in ("TEAM_COMPOSITION_BUILDING", "TEAM_COUNTER_ANALYSIS") or ((comp_archetype or damage_composition) and not champ):
             target_comp = damage_composition or comp_archetype or "hypercarry_protect"
-            is_counter_comp = (
-                intent == "TEAM_COUNTER_ANALYSIS"
-                or any(w in question.lower() for w in ["counter", "against", "beat", "facing", "versus", "vs", "punish", "enemy"])
-            )
-            if is_counter_comp:
+            is_counter = intent == "TEAM_COUNTER_ANALYSIS" or any(w in question.lower() for w in COUNTER_KEYWORDS)
+            if is_counter:
                 return f"Counter picks and itemization strategy against {target_comp} team composition in League of Legends"
-            else:
-                p_curve = classification.get("power_curve") or ""
-                return f"Drafting core champions synergies {p_curve} and playstyle for {target_comp} team composition League of Legends"
+            p_curve = classification.get("power_curve") or ""
+            return f"Drafting core champions synergies {p_curve} and playstyle for {target_comp} team composition League of Legends"
 
         # 6. Multi-Enemy Team Counter Analysis
         if intent == "TEAM_COUNTER_ANALYSIS" or (enemy_champs and len(enemy_champs) >= 2 and intent in ("COUNTER_QUERY", "UNKNOWN")):
             team_str = ", ".join(enemy_champs) if enemy_champs else "enemy team"
             return f"Counter picks team composition strategy against {team_str} League of Legends"
 
-        # 7. Item Queries
+        # 7-10. Standalone Item, Rune, Skin, ARAM queries via template table
         if intent == "ITEM_INFO" or (item and not champ):
-            item_target = item or question
-            return f"{item_target} item stats recipe build cost passive active League of Legends"
-
-        # 8. Rune Queries
+            return STANDALONE_QUERY_TEMPLATES["ITEM_INFO"].format(item=item or question)
         if intent == "RUNE_INFO" or (rune and not champ):
-            rune_target = rune or question
-            return f"{rune_target} rune keystone precision domination sorcery resolve inspiration League of Legends"
-
-        # 9. Skin / Cosmetic Query
-        if intent == "SKIN_QUERY":
-            return f"{champ or ''} skins cosmetics chromas splash art catalog League of Legends".strip()
-
-        # 10. ARAM Balance Query
-        if intent == "ARAM_QUERY":
-            return f"{champ or ''} ARAM balance damage dealt taken modifiers Howling Abyss League of Legends".strip()
+            return STANDALONE_QUERY_TEMPLATES["RUNE_INFO"].format(rune=rune or question)
+        if intent in STANDALONE_QUERY_TEMPLATES:
+            return STANDALONE_QUERY_TEMPLATES[intent].format(champ=champ or "").strip()
 
         # 11. Crowd Control / Ability Effect Filters
-        if cc_types or effects or intent in ("CHAMPION_BY_CC", "CHAMPION_BY_EFFECT", "MULTI_PROPERTY_FILTER"):
-            criteria = []
-            if cc_types:
-                criteria.extend(cc_types)
-            if effects:
-                criteria.extend(effects)
+        if cc_types or effects or intent in CC_EFFECT_INTENTS:
+            criteria = (cc_types or []) + (effects or [])
             return f"Champions with {' '.join(criteria)} crowd control mechanics League of Legends"
 
-        # 12. Counter Queries by Role or Lane
+        # 12-13. Counter / Role / Lane Queries
         if intent == "COUNTER_QUERY" and (role or lane):
             return f"How to counter {lane_str}{role or ''} champions in League of Legends strategy laning counter picks items"
-
-        # 13. Role and Lane Queries
         if role or intent == "ROLE_QUERY":
             return f"{lane_str}{role or ''} champions archetype class tactics guide League of Legends"
         if lane or intent == "LANE_QUERY":
             return f"{lane} lane champions best picks matchups guide League of Legends"
 
         return question
+
+    def filter_composition_contexts(self, rag_contexts, classification):
+        """Filter RAG results for team composition queries."""
+        target_comp = classification.get("comp_archetype") or classification.get("damage_composition")
+        filtered = []
+        for c in rag_contexts:
+            meta = c.get("metadata", {})
+            comp_id = meta.get("comp_id", "")
+            chunk_type = meta.get("chunk_type", "")
+            source = c.get("source", "")
+            text_lower = (c.get("text") or "").lower()
+            first_line = text_lower.split("\n")[0]
+
+            if "graph" in source or chunk_type == "role_guide" or "role_guide" in source:
+                filtered.append(c)
+                continue
+
+            if target_comp:
+                target_tokens = [t for t in target_comp.lower().split("_") if len(t) > 2]
+                if (comp_id == target_comp) or any(t in first_line for t in target_tokens):
+                    filtered.append(c)
+            else:
+                filtered.append(c)
+
+        return filtered or rag_contexts
+
+    def filter_champion_contexts(self, rag_contexts, champion):
+        """Filter RAG results to ensure the requested champion is present in metadata or text."""
+        req_champ = champion.lower()
+        champ_filtered = [
+            c for c in rag_contexts
+            if req_champ in (c.get("text") or "").lower()
+            or req_champ == (c.get("metadata", {}).get("champion") or "").lower()
+            or req_champ == (c.get("metadata", {}).get("entity_name") or "").lower()
+        ]
+        return champ_filtered or rag_contexts
 
     def answer(self, question):
         """
@@ -211,54 +230,17 @@ class LoLBot:
                     rerank_top_k = rerank_top_k,
                 )
                 if intent in ("TEAM_COMPOSITION_BUILDING", "TEAM_COUNTER_ANALYSIS") or (classification.get("comp_archetype") and intent == "COUNTER_QUERY"):
-                    target_comp = classification.get("comp_archetype") or classification.get("damage_composition")
-                    filtered = []
-                    for c in rag_contexts:
-                        meta = c.get("metadata", {})
-                        comp_id = meta.get("comp_id", "")
-                        chunk_type = meta.get("chunk_type", "")
-                        source = c.get("source", "")
-                        text_lower = (c.get("text") or "").lower()
-                        first_line = text_lower.split("\n")[0]
-
-                        # Graph composition drafting results
-                        if "graph" in source:
-                            filtered.append(c)
-                            continue
-
-                        # Role tactical guides
-                        if chunk_type == "role_guide" or "role_guide" in source:
-                            filtered.append(c)
-                            continue
-
-                        # Targeted composition chunk
-                        if target_comp:
-                            target_tokens = [t for t in target_comp.lower().split("_") if len(t) > 2]
-                            is_target = (comp_id == target_comp) or any(t in first_line for t in target_tokens)
-                            if is_target:
-                                filtered.append(c)
-                        else:
-                            filtered.append(c)
-
-                    if filtered:
-                        rag_contexts = filtered
+                    rag_contexts = self.filter_composition_contexts(rag_contexts, classification)
 
                 # Champion-specific filtering: prevent unrelated champions from polluting targeted queries (e.g. ARAM, skins, lore, skills)
                 req_champ = (classification.get("champion_name") or "").lower()
                 if req_champ and intent in ("ARAM_QUERY", "SKIN_QUERY", "LORE_QUERY", "BUILD_QUERY", "CHAMPION_STATS_AT_LEVEL", "CHAMPION_BASE_STATS", "SKILL_INFO", "LIST_SKILLS"):
-                    champ_filtered = [
-                        c for c in rag_contexts
-                        if req_champ in (c.get("text") or "").lower()
-                        or req_champ == (c.get("metadata", {}).get("champion") or "").lower()
-                        or req_champ == (c.get("metadata", {}).get("entity_name") or "").lower()
-                    ]
-                    if champ_filtered:
-                        rag_contexts = champ_filtered
+                    rag_contexts = self.filter_champion_contexts(rag_contexts, req_champ)
 
                 if rag_contexts:
                     rag_context_text = self.rag_pipeline.format_context_for_llm(rag_contexts)
-            except Exception as e:
-                print(f"[LoLBot] RAG retrieval exception ({e}).")
+            except Exception:
+                pass
 
         # 3. Context Sufficiency and Anti-Hallucination Check
         has_champion = bool(classification.get("champion_name"))
@@ -291,8 +273,8 @@ class LoLBot:
                 res_disp = self.retriever.dispatch_query(intent, classification)
                 if isinstance(res_disp, dict) and not res_disp.get("error") and not res_disp.get("info"):
                     structured_data = res_disp
-            except Exception as e:
-                print(f"[LoLBot] Notice in dispatch_query ({e})")
+            except Exception:
+                pass
 
         if structured_data:
             insufficient_context = False
@@ -334,19 +316,16 @@ class LoLBot:
 
 
 # Singleton
-_bot_instance = None
+bot_instance = None
 
 
 def get_bot():
-    global _bot_instance
-    if _bot_instance is None:
-        _bot_instance = LoLBot()
-    return _bot_instance
+    global bot_instance
+    if bot_instance is None:
+        bot_instance = LoLBot()
+    return bot_instance
 
 
 if __name__ == "__main__":
     bot = get_bot()
-    print("\nTest Bot Query: Who counters Yasuo?")
     res = bot.answer("Who counters Yasuo?")
-    print(f"Intent: {res['intent']}")
-    print(f"Response:\n{res['response']}")
