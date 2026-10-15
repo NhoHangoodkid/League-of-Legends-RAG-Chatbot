@@ -31,6 +31,7 @@ class GraphRetriever:
         self.store = store or get_graph_store()
         self.traversal = GraphTraversal(self.store)
         self._champ_cache = None
+        self._entity_lookup_cache = {}
 
     def get_champ_cache(self):
         if self._champ_cache is None:
@@ -113,6 +114,10 @@ class GraphRetriever:
         if not name:
             return None
 
+        cache_key = name.strip().casefold()
+        if cache_key in self._entity_lookup_cache:
+            return self._entity_lookup_cache[cache_key]
+
         try:
             cypher = """
             MATCH (c:Champion)
@@ -124,7 +129,9 @@ class GraphRetriever:
             """
             results = self.store.run_cypher(cypher, name=name)
             if results:
-                return results[0]["id"]
+                champion_id = results[0]["id"]
+                self._entity_lookup_cache[cache_key] = champion_id
+                return champion_id
 
             cypher_fuzzy = """
             MATCH (c:Champion)
@@ -135,8 +142,10 @@ class GraphRetriever:
             """
             results = self.store.run_cypher(cypher_fuzzy, name=name)
             if results:
-                return results[0]["id"]
-
+                champion_id = results[0]["id"]
+                self._entity_lookup_cache[cache_key] = champion_id
+                return champion_id
+            self._entity_lookup_cache[cache_key] = None
         except Exception:
             pass
 

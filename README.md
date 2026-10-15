@@ -70,6 +70,12 @@ python app/cli.py
 ```
 Access the web interface at **`http://localhost:8501`**.
 
+### Token and Retrieval Efficiency
+
+The chatbot applies intent-based response limits: up to 256 generated tokens for concise factual queries, 512 for standard answers, and 768 for strategy or composition answers. `LLM_NUM_PREDICT` remains the configurable maximum. Concise response templates share grounding/style rules and add only intent-specific instructions. Retrieved reference data is capped at an estimated 2,048 tokens and further reduced to fit `LLM_NUM_CTX`; recent conversation history sent to intent classification is limited to 256 estimated tokens. Token counts use a conservative UTF-8 size estimate rather than loading another tokenizer.
+
+Champion-name lookups are cached for the lifetime of the graph retriever, avoiding repeated Neo4j queries for names already resolved during the session.
+
 ---
 
 ## License & Disclaimer

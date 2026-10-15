@@ -6,24 +6,16 @@ into natural, fluent, and accurate answers in English using local LLM via Ollama
 Includes a clean direct fallback formatter if the LLM is offline or times out.
 """
 
-import json
 import re
 
 import httpx
 from openai import OpenAI
 
-from chatbot.config import llm_model, llm_num_ctx, llm_num_predict, llm_temperature, ollama_base_url
+from chatbot.config import llm_model, llm_num_ctx, llm_num_predict, ollama_base_url
 from chatbot.intent_classifier import is_ollama_available
-from chatbot.prompts import (
-    champion_synergy_prompt,
-    champion_team_composition_prompt,
-    conversation_system_prompt,
-    counter_champion_prompt,
-    general_response_prompt,
-    response_generation_prompt,
-    team_building_prompt,
-    team_counter_prompt,
-)
+from chatbot.prompts import conversation_system_prompt
+from chatbot.response_prompts import select_response_prompt
+from chatbot.token_budget import fit_reference_context, response_token_budget
 
 
 class ResponseGenerator:
@@ -405,15 +397,9 @@ class ResponseGenerator:
 
         if rag_ctx:
             if fact_lines:
-                truncated_rag = rag_ctx.strip()
-                if len(truncated_rag) > 1200:
-                    truncated_rag = truncated_rag[:1200] + "\n[... additional context omitted for conciseness ...]"
-                sections.append(truncated_rag)
+                sections.append(rag_ctx.strip())
             else:
-                truncated_rag = rag_ctx.strip()
-                if len(truncated_rag) > 2500:
-                    truncated_rag = truncated_rag[:2500] + "\n[... additional context omitted for conciseness ...]"
-                sections.append(truncated_rag)
+                sections.append(rag_ctx.strip())
 
         # 3. Anti-hallucination notice if no context found
         if data.get("insufficient_context") or not sections:
@@ -438,21 +424,17 @@ class ResponseGenerator:
         data_text = self.serialize_for_llm(retrieved_data, question = question)
         s_data = retrieved_data.get("structured_data", {})
         intent = retrieved_data.get("intent", "")
-        q_lower = question.lower()
 
-        # Select specialized, hyper-focused prompt template
-        if s_data.get("is_champion_composition") or intent == "CHAMPION_TEAM_COMPOSITION" or (s_data.get("best_team_compositions") and any(w in q_lower for w in ["đội hình", "team comp", "lineup", "composition"])):
-            template = champion_team_composition_prompt
-        elif s_data.get("is_synergy_query") or intent == "SYNERGY_QUERY" or s_data.get("best_duos"):
-            template = champion_synergy_prompt
-        elif s_data.get("is_counter_query") or (intent == "COUNTER_QUERY" and s_data.get("weak_against")):
-            template = counter_champion_prompt
-        elif s_data.get("is_team_counter_analysis") or (intent == "TEAM_COUNTER_ANALYSIS") or (s_data.get("is_composition_query") and any(w in q_lower for w in ["counter", "against", "beat", "deal with", "facing", "versus", "vs"])):
-            template = team_counter_prompt
-        elif s_data.get("is_composition_building") or (intent == "TEAM_COMPOSITION_BUILDING"):
-            template = team_building_prompt
-        else:
-            template = general_response_prompt
+        template = select_response_prompt(intent, s_data, question)
+        output_token_budget = response_token_budget(intent, llm_num_predict)
+        data_text = fit_reference_context(
+            context=data_text,
+            question=question,
+            template=template,
+            system_prompt=conversation_system_prompt,
+            context_window=llm_num_ctx,
+            output_tokens=output_token_budget,
+        )
 
         prompt = template.format(
             question = question,
@@ -468,14 +450,14 @@ class ResponseGenerator:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.3,
-                    max_tokens = llm_num_predict,
+                    max_tokens = output_token_budget,
                     extra_body={
                         "num_ctx": llm_num_ctx,
-                        "num_predict": llm_num_predict,
+                        "num_predict": output_token_budget,
                         "options": {
                             "think": False,
                             "temperature": 0.3,
-                            "num_predict": llm_num_predict,
+                            "num_predict": output_token_budget,
                         },
                     },
                 )

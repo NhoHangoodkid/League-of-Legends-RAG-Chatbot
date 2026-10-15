@@ -14,6 +14,7 @@ from openai import OpenAI
 
 from chatbot.config import llm_model, llm_temperature, ollama_base_url
 from chatbot.prompts import intent_classification_prompt
+from chatbot.token_budget import format_recent_history
 
 ollama_status_cache = {"last_check": 0.0, "is_ready": False}
 
@@ -88,14 +89,7 @@ class IntentClassifier:
             return heuristic_res
 
         # Build conversational context
-        context_str = ""
-        if conversation_history:
-            recent_history = conversation_history[-4:]
-            context_lines = []
-            for msg in recent_history:
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                context_lines.append(f"{role}: {msg.get('content', '')}")
-            context_str = "\n".join(context_lines)
+        context_str = format_recent_history(conversation_history)
 
         prompt = intent_classification_prompt.format(question = question)
         messages = []
