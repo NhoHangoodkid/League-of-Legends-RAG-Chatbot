@@ -1,4 +1,4 @@
-# ⚔️ League of Legends Hybrid GraphRAG AI Assistant
+# League of Legends Hybrid GraphRAG AI Assistant
 
 A production-grade **Hybrid GraphRAG** tactical coach and conversational assistant for **League of Legends**, combining **Neo4j Knowledge Graph**, **fine-tuned LoRA dense retrieval (FAISS)**, **cross-encoder neural re-ranking**, and **multi-store persistence** behind a sleek **Void Glassmorphism UI**.
 
@@ -6,7 +6,7 @@ A production-grade **Hybrid GraphRAG** tactical coach and conversational assista
 
 ---
 
-## 🛠️ Tools & Technologies Used
+## Tools & Technologies Used
 
 The assistant is built on modular AI & Data ecosystems:
 
@@ -68,7 +68,6 @@ streamlit run app/streamlit_app.py
 # Or Terminal CLI
 python app/cli.py
 ```
-Access the web interface at **`http://localhost:8501`**.
 
 ### Token and Retrieval Efficiency
 
